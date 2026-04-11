@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "987763082270",
+    "project_id": "team-up-game-a6449",
+    "storage_bucket": "team-up-game-a6449.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:987763082270:android:894942f41c014819d4da0f",
+        "android_client_info": {
+          "package_name": "com.example.teamup"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDIxaHsjQBSRFxwCIaMn0KEy-NMbT3u_Ww"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
