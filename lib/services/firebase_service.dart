@@ -36,6 +36,7 @@ class FirebaseService {
       'status': 'waiting',
       'hostId': playerId,
       'missed_count': 0,
+      'round_number': 0,
     });
 
     await playerRef.set({

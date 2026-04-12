@@ -4,8 +4,10 @@ import '../widgets/control_factory.dart';
 import '../services/firebase_service.dart';
 import '../services/instruction_service.dart';
 import '../widgets/animated_banner.dart';
+import '../widgets/round_timer_banner.dart';
 import 'lobby_screen.dart'; 
-import 'waiting_room_screen.dart'; // NEW: Required for returning to the lobby
+import 'waiting_room_screen.dart';
+import 'success_screen.dart';
 
 class PlayScreen extends StatefulWidget {
   final String sessionId;
@@ -28,11 +30,14 @@ class PlayScreen extends StatefulWidget {
 class _PlayScreenState extends State<PlayScreen> {
   final FirebaseService _firebaseService = FirebaseService();
   final InstructionService _instructionService = InstructionService();
+  
+  // Logic gate to prevent multiple navigation triggers or flickering during state changes
+  bool _isTransitioning = false;
 
-  // UPDATED: Smart exit logic
   Future<void> _handleExit() async {
+    if (_isTransitioning) return;
+
     if (widget.isHost) {
-      // 1. If host leaves, the nuclear option: delete everything
       await _firebaseService.deleteRoom(widget.sessionId);
       if (mounted) {
         Navigator.pushReplacement(
@@ -41,7 +46,6 @@ class _PlayScreenState extends State<PlayScreen> {
         );
       }
     } else {
-      // 2. If client leaves, remove them and check if the room still exists
       await _firebaseService.leaveRoom(widget.sessionId, widget.localPlayerId);
       
       if (!mounted) return;
@@ -49,13 +53,11 @@ class _PlayScreenState extends State<PlayScreen> {
       final players = await _firebaseService.getPlayers(widget.sessionId);
       
       if (players == null) {
-        // Room is gone (Host disconnected)
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const LobbyScreen()),
         );
       } else {
-        // Room still exists, go back to the Waiting Room
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
@@ -76,7 +78,7 @@ class _PlayScreenState extends State<PlayScreen> {
     return PopScope(
       canPop: false,
       onPopInvoked: (didPop) async {
-        if (didPop) return;
+        if (didPop || _isTransitioning) return;
         await _handleExit();
       },
       child: Scaffold(
@@ -94,24 +96,62 @@ class _PlayScreenState extends State<PlayScreen> {
           builder: (context, snapshot) {
             if (snapshot.hasError) return Center(child: Text('Error: ${snapshot.error}'));
             
-            // AUTO-EXIT: If the stream detects the room was deleted while we are playing
+            // 1. Wait for the stream to initialize to prevent the "Lobby Bounce"
+            if (snapshot.connectionState == ConnectionState.waiting && !_isTransitioning) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            // 2. Only redirect if the session is genuinely missing after connection is active
             if (!snapshot.hasData || snapshot.data!.snapshot.value == null) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(builder: (context) => const LobbyScreen()),
-                  );
-                }
-              });
-              return const Center(child: Text('Laboratory Decommissioned...'));
+              if (snapshot.connectionState == ConnectionState.active && !_isTransitioning) {
+                _isTransitioning = true;
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) {
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(builder: (context) => const LobbyScreen()),
+                    );
+                  }
+                });
+              }
+              return const Center(child: Text('Re-establishing Uplink...'));
             }
 
             final rawValue = snapshot.data!.snapshot.value;
             if (rawValue is! Map) return const Center(child: Text('Invalid data format.'));
 
             final sessionData = Map<dynamic, dynamic>.from(rawValue);
+            final String status = sessionData['status'] ?? 'playing';
+
+            // --- 3. THE FIX: SUCCESS STATE DETECTION ---
+            // If the host has updated the status to 'success', everyone transitions once.
+            if (status == 'success' && !_isTransitioning) {
+              _isTransitioning = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => SuccessScreen(
+                        sessionId: widget.sessionId,
+                        localPlayerId: widget.localPlayerId,
+                        localPlayerName: widget.localPlayerName,
+                        missedCount: (sessionData['missed_count'] as num? ?? 0).toInt(),
+                        isHost: widget.isHost,
+                      ),
+                    ),
+                  );
+                }
+              });
+              return const Center(child: Text('MISSION COMPLETE\nPREPARING DEBRIEF...'));
+            }
+
+            // Normal Gameplay Data Parsing
             final int missedCount = (sessionData['missed_count'] as num?)?.toInt() ?? 0;
+            final int roundNumber = (sessionData['round_number'] as num? ?? 1).toInt();
+            final int roundEnd = (sessionData['round_end_timestamp'] as num? ?? 0).toInt();
+            final int instructionDuration = (sessionData['instruction_duration'] as num? ?? 15).toInt();
+            final int totalRoundDuration = (sessionData['round_duration_ms'] as num? ?? 120000).toInt();
 
             final dynamic playersRaw = sessionData['players'];
             Map<dynamic, dynamic> playersData = playersRaw is Map ? playersRaw : {};
@@ -164,6 +204,21 @@ class _PlayScreenState extends State<PlayScreen> {
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(8.0),
+                  color: Colors.blueGrey.shade900,
+                  child: Text(
+                    'MISSION ROUND: $roundNumber',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.cyanAccent, 
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                ),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8.0),
                   color: Colors.red.shade900,
                   child: Text(
                     'TEAM ERRORS: $missedCount',
@@ -173,12 +228,13 @@ class _PlayScreenState extends State<PlayScreen> {
                 ),
                 AnimatedInstructionBanner(
                   instruction: localInstruction,
-                  durationInSeconds: 15,
+                  durationInSeconds: instructionDuration,
                   onTimeExpired: () {
-                    if (localInstruction.contains('PREPARING') || 
+                    if (localInstruction.contains('CALIBRATING') || 
                         localInstruction.contains('GET READY') || 
-                        localInstruction.contains('Stand by') || 
-                        localInstruction.contains('ONLINE')) {
+                        localInstruction.contains('STAND BY') || 
+                        localInstruction.contains('ONLINE') ||
+                        _isTransitioning) {
                       return;
                     }
                     _instructionService.handleInstructionTimeout(
@@ -209,7 +265,6 @@ class _PlayScreenState extends State<PlayScreen> {
                                 spacing: 16.0,
                                 runSpacing: 16.0,
                                 children: activeControls.map((control) {
-                                  
                                   double idealWidth;
                                   switch (control.type) {
                                     case ControlType.dial:
@@ -240,16 +295,20 @@ class _PlayScreenState extends State<PlayScreen> {
                                             child: controlFactory(
                                               control, 
                                               (newValue) {
-                                                _firebaseService.updateControl(widget.sessionId, control.id, newValue);
+                                                if (!_isTransitioning) {
+                                                  _firebaseService.updateControl(widget.sessionId, control.id, newValue);
+                                                }
                                               },
                                               (finalValue) {
-                                                _instructionService.verifyInteraction(
-                                                  sessionId: widget.sessionId,
-                                                  control: control,
-                                                  newValue: finalValue,
-                                                  playersData: playersData, 
-                                                  allRoomControls: allRoomControls,
-                                                );
+                                                if (!_isTransitioning) {
+                                                  _instructionService.verifyInteraction(
+                                                    sessionId: widget.sessionId,
+                                                    control: control,
+                                                    newValue: finalValue,
+                                                    playersData: playersData, 
+                                                    allRoomControls: allRoomControls,
+                                                  );
+                                                }
                                               }
                                             ),
                                           ),
@@ -266,6 +325,18 @@ class _PlayScreenState extends State<PlayScreen> {
                     },
                   ),
                 ),
+
+                if (roundEnd > 0 && !_isTransitioning)
+                  RoundTimerBanner(
+                    endTimestamp: roundEnd,
+                    totalDurationMs: totalRoundDuration,
+                    onFinished: () {
+                      if (widget.isHost && !_isTransitioning) {
+                        // Only the Host updates the DB; the StreamBuilder handles navigation for everyone
+                        _firebaseService.initializeRoom(widget.sessionId, {'status': 'success'});
+                      }
+                    },
+                  ),
               ],
             );
           },

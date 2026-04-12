@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'package:firebase_database/firebase_database.dart';
 import '../models/game_control.dart';
 import '../data/control_library.dart';
 import 'firebase_service.dart';
@@ -9,30 +10,35 @@ class RoomService {
   final InstructionService _instructionService = InstructionService();
 
   Future<void> startNewGame(String sessionId) async {
-    // 1. Fetch connected players from the lobby
-    final playersData = await _firebaseService.getPlayers(sessionId);
-    if (playersData == null || playersData.isEmpty) return;
+    final sessionSnapshot = await _firebaseService.getGameStream(sessionId).first;
+    final sessionData = sessionSnapshot.snapshot.value as Map?;
+    if (sessionData == null) return;
 
+    int currentRound = (sessionData['round_number'] as num? ?? 0).toInt();
+    int nextRound = currentRound == 0 ? 1 : currentRound + 1;
+
+    // --- DIFFICULTY SCALING ALGORITHM ---
+    // Controls: Start at 3, add 1 every 2 rounds, max out at 8.
+    int controlsPerPlayer = (3 + (nextRound / 2).floor()).clamp(3, 8);
+    
+    // Instruction Speed: Start at 15s, reduce by 1s every round, floor at 5s.
+    int instructionSeconds = (16 - nextRound).clamp(5, 15);
+    // ------------------------------------
+
+    final dynamic playersRaw = sessionData['players'];
+    if (playersRaw == null || playersRaw is! Map) return;
+    Map<dynamic, dynamic> playersData = Map.from(playersRaw);
     List<String> playerIds = playersData.keys.cast<String>().toList();
 
-    // 2. Prepare the control pool
     List<GameControl> pool = List.from(ControlLibrary.laboratoryPool);
     pool.shuffle();
-
-    // 3. Determine control distribution
-    // We aim for roughly 4 controls per player, limited by the pool size.
-    int controlsPerPlayer = (pool.length / playerIds.length).floor();
-    if (controlsPerPlayer > 4) controlsPerPlayer = 4; 
-    if (controlsPerPlayer < 1) controlsPerPlayer = 1; 
 
     Map<String, dynamic> controlsMap = {};
     int poolIndex = 0;
 
-    // 4. Distribute unique controls to each player
     for (String playerId in playerIds) {
       for (int i = 0; i < controlsPerPlayer; i++) {
         if (poolIndex >= pool.length) break; 
-        
         final item = pool[poolIndex];
         controlsMap[item.id] = {
           'label': item.label,
@@ -44,34 +50,33 @@ class RoomService {
           'max': item.max,
           'step': item.step,
           'unit': item.unit,
-          'ownerId': playerId, // Each control is assigned to a specific player
-          'options': item.options, // Include non-numerical labels if present
+          'ownerId': playerId,
+          'options': item.options,
         };
         poolIndex++;
       }
     }
 
-    // 5. Update player states for game start
-    // We preserve the player IDs and names but set the initial game instructions.
     Map<dynamic, dynamic> updatedPlayers = Map.from(playersData);
     updatedPlayers.forEach((key, value) {
       if (value is Map) {
-        value['current_instruction'] = 'PREPARING LABORATORY...';
+        value['current_instruction'] = 'CALIBRATING SYSTEM...';
         value['target_id'] = '';
         value['target_value'] = -1.0;
+        value['isReady'] = false;
       }
     });
 
-    // 6. Initialize the room database
-    // Setting status to 'playing' triggers the UI transition on all client devices.
     await _firebaseService.initializeRoom(sessionId, {
       'status': 'playing',
       'controls': controlsMap,
       'missed_count': 0,
+      'round_number': nextRound,
+      'instruction_duration': instructionSeconds,
       'players': updatedPlayers, 
+      'round_end_timestamp': 0,
     });
 
-    // Create a local list of all assigned controls for the instruction generator
     List<GameControl> allAssignedControls = [];
     controlsMap.forEach((key, data) {
       allAssignedControls.add(GameControl(
@@ -83,26 +88,22 @@ class RoomService {
       ));
     });
 
-    // Short pause for screen transition to settle
     await Future.delayed(const Duration(seconds: 2));
 
-    // --- SYNCHRONIZED START SEQUENCE ---
-    // Push 'GET READY' to every player's banner
     for (String pId in playerIds) {
-      await _firebaseService.setPlayerInstruction(
-        sessionId, 
-        pId, 
-        'GET READY', 
-        '', 
-        -1.0
-      );
+      await _firebaseService.setPlayerInstruction(sessionId, pId, 'GET READY', '', -1.0);
     }
     
-    // Wait for the duration of a standard instruction (15 seconds)
-    await Future.delayed(const Duration(seconds: 15));
-    // ------------------------------------
+    await Future.delayed(Duration(seconds: instructionSeconds));
 
-    // 7. Launch initial independent instructions for every player
+    const int roundDurationMs = 2 * 60 * 1000; 
+    final int endTime = DateTime.now().millisecondsSinceEpoch + roundDurationMs;
+    
+    await _firebaseService.initializeRoom(sessionId, {
+      'round_end_timestamp': endTime,
+      'round_duration_ms': roundDurationMs,
+    });
+
     for (String pId in playerIds) {
       await _instructionService.generateInstructionForPlayer(
         sessionId, 

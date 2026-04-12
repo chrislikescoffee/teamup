@@ -23,62 +23,50 @@ class WaitingRoomScreen extends StatefulWidget {
 }
 
 class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
-  final FirebaseService _firebaseService = FirebaseService();
-  final RoomService _roomService = RoomService();
+  late final FirebaseService _firebaseService;
+  late final RoomService _roomService;
 
-  Future<void> _handleExit() async {
-    if (widget.isHost) {
-      await _firebaseService.deleteRoom(widget.sessionId);
-    } else {
-      await _firebaseService.leaveRoom(widget.sessionId, widget.localPlayerId);
-    }
-    if (mounted) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LobbyScreen()));
-    }
+  @override
+  void initState() {
+    super.initState();
+    debugPrint('DEBUG: [WaitingRoom] initState triggered');
+    _firebaseService = FirebaseService();
+    _roomService = RoomService();
   }
 
-  // NEW: Confirmation Dialog for the Host
-  Future<void> _confirmStart(bool allReady) async {
-    if (allReady) {
-      _roomService.startNewGame(widget.sessionId);
-      return;
-    }
-
-    final bool? shouldStart = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Scientists Not Ready'),
-        content: const Text('Not all players are ready. Are you sure you want to start the mission?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('CANCEL'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('START ANYWAY', style: TextStyle(color: Colors.orange)),
-          ),
-        ],
-      ),
-    );
-
-    if (shouldStart == true) {
-      _roomService.startNewGame(widget.sessionId);
+  Future<void> _handleExit() async {
+    debugPrint('DEBUG: [WaitingRoom] _handleExit triggered');
+    try {
+      if (widget.isHost) {
+        await _firebaseService.deleteRoom(widget.sessionId);
+      } else {
+        await _firebaseService.leaveRoom(widget.sessionId, widget.localPlayerId);
+      }
+      if (mounted) {
+        Navigator.pushReplacement(
+          context, 
+          MaterialPageRoute(builder: (context) => const LobbyScreen())
+        );
+      }
+    } catch (e) {
+      debugPrint('DEBUG: [WaitingRoom] Exit Error: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    debugPrint('DEBUG: [WaitingRoom] build() method executing');
+
     return PopScope(
       canPop: false,
       onPopInvoked: (didPop) async {
         if (didPop) return;
+        debugPrint('DEBUG: [WaitingRoom] PopScope internal exit');
         await _handleExit();
       },
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Waiting Room'),
-          centerTitle: true,
           actions: [
             IconButton(icon: const Icon(Icons.logout), onPressed: _handleExit)
           ],
@@ -86,13 +74,46 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
         body: StreamBuilder(
           stream: _firebaseService.getGameStream(widget.sessionId),
           builder: (context, snapshot) {
-            if (!snapshot.hasData || snapshot.data!.snapshot.value == null) {
-              return const Center(child: Text('Session Ended.'));
+            // TRACKING THE STREAM STATE
+            debugPrint('DEBUG: [Stream] State: ${snapshot.connectionState}, HasData: ${snapshot.hasData}');
+
+            if (snapshot.hasError) {
+              debugPrint('DEBUG: [Stream] ERROR: ${snapshot.error}');
+              return Center(child: Text('Error: ${snapshot.error}'));
             }
 
-            final sessionData = Map<dynamic, dynamic>.from(snapshot.data!.snapshot.value as Map);
-            
-            if (sessionData['status'] == 'playing') {
+            // If we are still waiting for the very first connection, don't do anything yet
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            // CRITICAL SECTION: The data check
+            final dataValue = snapshot.data?.snapshot.value;
+            debugPrint('DEBUG: [Stream] Snapshot Value is Null? ${dataValue == null}');
+
+            if (dataValue == null) {
+              // Only redirect if the stream is active and genuinely returned nothing
+              if (snapshot.connectionState == ConnectionState.active) {
+                debugPrint('DEBUG: [WaitingRoom] DATA IS NULL - REDIRECTING TO LOBBY');
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) {
+                    Navigator.pushReplacement(
+                      context, 
+                      MaterialPageRoute(builder: (context) => const LobbyScreen())
+                    );
+                  }
+                });
+              }
+              return const Center(child: Text('Connecting to Lab...'));
+            }
+
+            // If we made it here, we have data!
+            final sessionData = Map<dynamic, dynamic>.from(dataValue as Map);
+            final String status = sessionData['status'] ?? 'waiting';
+            debugPrint('DEBUG: [WaitingRoom] Session status found: $status');
+
+            if (status == 'playing') {
+              debugPrint('DEBUG: [WaitingRoom] Transitioning to PlayScreen');
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (mounted) {
                   Navigator.pushReplacement(
@@ -108,11 +129,21 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
                   );
                 }
               });
-              return const Center(child: CircularProgressIndicator());
+              return const Center(child: CircularProgressIndicator(color: Colors.cyanAccent));
             }
 
             final dynamic playersRaw = sessionData['players'];
-            Map<dynamic, dynamic> playersData = playersRaw is Map ? playersRaw : {};
+            Map playersData = playersRaw is Map ? playersRaw : {};
+            debugPrint('DEBUG: [WaitingRoom] Player count: ${playersData.length}');
+
+            // Safety check for players
+            if (status == 'waiting' && !widget.isHost && !playersData.containsKey(widget.localPlayerId)) {
+              debugPrint('DEBUG: [WaitingRoom] Local player not in list - exiting');
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LobbyScreen()));
+              });
+              return const Center(child: Text('Removing from session...'));
+            }
 
             bool allReady = true;
             bool amIReady = false;
@@ -129,11 +160,7 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
                 ListTile(
                   leading: Icon(ready ? Icons.check_circle : Icons.radio_button_unchecked, 
                              color: ready ? Colors.green : Colors.grey),
-                  title: Text(pData['name'] ?? 'Unknown'),
-                  trailing: (widget.isHost && pId != widget.localPlayerId) 
-                    ? IconButton(icon: const Icon(Icons.person_remove, color: Colors.red),
-                        onPressed: () => _firebaseService.bootPlayer(widget.sessionId, pId)) 
-                    : null,
+                  title: Text(pData['name'] ?? 'Scientist'),
                 )
               );
             });
@@ -159,42 +186,34 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
                     ],
                   ),
                 ),
-                const Divider(),
                 Expanded(child: ListView(children: playerTiles)),
-                
-                // UPDATED: Combined Host Control Area
                 Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
                     children: [
-                      // Both Host and Client now have the Ready Toggle
                       SizedBox(
                         width: double.infinity,
                         height: 50,
                         child: OutlinedButton.icon(
                           icon: Icon(amIReady ? Icons.check : Icons.priority_high),
                           label: Text(amIReady ? 'I AM READY' : 'SET READY STATUS'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: amIReady ? Colors.green : Colors.blue,
-                            side: BorderSide(color: amIReady ? Colors.green : Colors.blue),
-                          ),
                           onPressed: () => _firebaseService.toggleReadyStatus(
                             widget.sessionId, widget.localPlayerId, !amIReady
                           ),
                         ),
                       ),
                       const SizedBox(height: 16),
-                      // Only Host sees the Start Mission button
                       if (widget.isHost)
                         SizedBox(
                           width: double.infinity,
                           height: 60,
                           child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: allReady ? Colors.green : Colors.orange,
-                            ),
-                            onPressed: () => _confirmStart(allReady),
-                            child: const Text('START MISSION', style: TextStyle(fontSize: 18, color: Colors.white)),
+                            style: ElevatedButton.styleFrom(backgroundColor: allReady ? Colors.green : Colors.orange),
+                            onPressed: () {
+                               debugPrint('DEBUG: [WaitingRoom] Host pressed Start Mission');
+                               _roomService.startNewGame(widget.sessionId);
+                            },
+                            child: const Text('START MISSION', style: TextStyle(color: Colors.white)),
                           ),
                         ),
                     ],

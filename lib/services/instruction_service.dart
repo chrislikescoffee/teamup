@@ -1,149 +1,145 @@
 import 'dart:math';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_core/firebase_core.dart';
 import '../models/game_control.dart';
 import 'firebase_service.dart';
 
 class InstructionService {
   final FirebaseService _firebaseService = FirebaseService();
+  final DatabaseReference _dbRef = FirebaseDatabase.instanceFor(
+    app: Firebase.app(),
+    databaseURL: 'https://team-up-game-a6449-default-rtdb.asia-southeast1.firebasedatabase.app',
+  ).ref();
+
   final Random _random = Random();
 
-  Future<void> handleInstructionTimeout(String sessionId, String playerId, List<GameControl> activeControls, Map<dynamic, dynamic> playersData) async {
-    print('\n=========================================');
-    print('TIMEOUT: Player $playerId missed instruction!');
-    print('=========================================\n');
-    
-    await _firebaseService.incrementMissedCount(sessionId);
-    await generateInstructionForPlayer(sessionId, playerId, activeControls, playersData);
-  }
-
-  Future<void> verifyInteraction({
-    required String sessionId,
-    required GameControl control,
-    required double newValue,
-    required Map<dynamic, dynamic> playersData, 
-    required List<GameControl> allRoomControls,
-  }) async {
-    
-    _firebaseService.updateControl(sessionId, control.id, newValue);
-
-    List<String> completedPlayerIds = [];
-
-    playersData.forEach((playerId, data) {
-      if (data is Map) {
-        String tId = data['target_id']?.toString() ?? '';
-        double tVal = (data['target_value'] as num? ?? -1).toDouble();
-
-        if (control.id == tId && (newValue - tVal).abs() < 0.001) {
-          completedPlayerIds.add(playerId.toString());
-        }
-      }
-    });
-
-    if (completedPlayerIds.isNotEmpty) {
-      for (String pId in completedPlayerIds) {
-        print('\n=========================================');
-        print('SUCCESS: Instruction completed for Player $pId!');
-        print('=========================================\n');
-        
-        await generateInstructionForPlayer(
-          sessionId, 
-          pId, 
-          allRoomControls, 
-          playersData, // Pass active players
-          completedControlId: control.id,
-        );
-      }
-    } else {
-      print('INCIDENTAL: Interacted with ${control.label} (Value: $newValue)');
-    }
-  }
-
+  /// Generates a new random instruction for a specific player based on all controls in the room.
   Future<void> generateInstructionForPlayer(
     String sessionId, 
-    String playerId,
-    List<GameControl> allRoomControls, 
-    Map<dynamic, dynamic> playersData, // NEW: Required to filter ghost controls
-    {String? completedControlId}
+    String playerId, 
+    List<GameControl> allControls, 
+    Map<dynamic, dynamic> playersData,
   ) async {
-    if (allRoomControls.isEmpty) return;
+    if (allControls.isEmpty) return;
 
-    // FILTER: Only look at controls whose owner is currently in the players list
-    List<GameControl> validControls = allRoomControls.where((c) => playersData.containsKey(c.ownerId)).toList();
-    if (validControls.isEmpty) return; // Failsafe if everyone left
+    // Fetch the current round's duration to ensure internal logic matches the UI
+    final snapshot = await _dbRef.child('sessions/$sessionId/instruction_duration').get();
+    int duration = (snapshot.value as num? ?? 15).toInt();
 
-    final freshControls = await _firebaseService.getRoomControls(sessionId);
+    // Select a random control from the global pool
+    final targetControl = allControls[_random.nextInt(allControls.length)];
     
-    List<GameControl> availableControls = validControls.where((c) => c.id != completedControlId).toList();
-    if (availableControls.isEmpty) availableControls = validControls;
-
-    if (freshControls != null) {
-      for (var c in availableControls) {
-        if (freshControls[c.id] != null) {
-          c.value = (freshControls[c.id]['value'] as num? ?? 0).toDouble();
-        }
-      }
-    }
-
-    List<GameControl> selfControls = availableControls.where((c) => c.ownerId == playerId).toList();
-    List<GameControl> teamControls = availableControls.where((c) => c.ownerId != playerId).toList();
-
-    GameControl? targetControl;
-    
-    if (_random.nextDouble() < 0.30 && selfControls.isNotEmpty) {
-      targetControl = selfControls[_random.nextInt(selfControls.length)];
-    } else if (teamControls.isNotEmpty) {
-      targetControl = teamControls[_random.nextInt(teamControls.length)];
-    } else {
-      targetControl = selfControls[_random.nextInt(selfControls.length)];
-    }
-
-    String text = "";
+    String instructionText = "";
     double targetValue = 0.0;
 
+    // --- COMPLEX INSTRUCTION BUILDER ---
     switch (targetControl.type) {
       case ControlType.toggle:
-        bool isCurrentlyOn = targetControl.value >= 0.5;
-        targetValue = isCurrentlyOn ? 0.0 : 1.0;
-        text = targetValue == 1.0 ? "${targetControl.onAction} ${targetControl.label}" : "${targetControl.offAction} ${targetControl.label}";
+        targetValue = _random.nextBool() ? 1.0 : 0.0;
+        String action = targetValue == 1.0 ? targetControl.onAction : targetControl.offAction;
+        instructionText = "TOGGLE ${targetControl.label} TO $action";
         break;
 
-
-
       case ControlType.slider:
-      case ControlType.dial:
-        double current = targetControl.value;
-        double next;
-        int totalSteps = ((targetControl.max - targetControl.min) / targetControl.step).round();
-        do {
-          int randomStep = _random.nextInt(totalSteps + 1);
-          next = targetControl.min + (randomStep * targetControl.step);
-          next = double.parse(next.toStringAsFixed(2));
-        } while ((next - current).abs() < 0.001);
-        
-        targetValue = next;
-
-        // NEW: Check for string options
         if (targetControl.options != null && targetControl.options!.isNotEmpty) {
-          int index = targetValue.round().clamp(0, targetControl.options!.length - 1);
-          String optionText = targetControl.options![index];
-          text = "Set ${targetControl.label} to $optionText";
+          int optIndex = _random.nextInt(targetControl.options!.length);
+          targetValue = optIndex.toDouble();
+          instructionText = "SLIDE ${targetControl.label} TO ${targetControl.options![optIndex]}";
         } else {
-          String displayValue = targetValue == targetValue.truncateToDouble() ? targetValue.toInt().toString() : targetValue.toStringAsFixed(1);
-          text = "Set ${targetControl.label} to $displayValue${targetControl.unit}";
+          int steps = ((targetControl.max - targetControl.min) / targetControl.step).round();
+          int randomStep = _random.nextInt(steps + 1);
+          targetValue = targetControl.min + (randomStep * targetControl.step);
+          String displayVal = _formatValue(targetValue);
+          instructionText = "ADJUST ${targetControl.label} TO $displayVal${targetControl.unit}";
+        }
+        break;
+
+      case ControlType.dial:
+        if (targetControl.options != null && targetControl.options!.isNotEmpty) {
+          int optIndex = _random.nextInt(targetControl.options!.length);
+          targetValue = optIndex.toDouble();
+          instructionText = "ROTATE ${targetControl.label} TO ${targetControl.options![optIndex]}";
+        } else {
+          int steps = ((targetControl.max - targetControl.min) / targetControl.step).round();
+          int randomStep = _random.nextInt(steps + 1);
+          targetValue = targetControl.min + (randomStep * targetControl.step);
+          String displayVal = _formatValue(targetValue);
+          instructionText = "SET ${targetControl.label} TO $displayVal${targetControl.unit}";
         }
         break;
 
       case ControlType.button:
         targetValue = 1.0;
-        text = "${targetControl.onAction} ${targetControl.label}";
+        instructionText = "${targetControl.onAction} ${targetControl.label}";
         break;
     }
 
     await _firebaseService.setPlayerInstruction(
       sessionId, 
       playerId, 
-      text, 
+      instructionText.toUpperCase(), 
       targetControl.id, 
       targetValue
+    );
+  }
+
+  /// Helper to format numbers cleanly for instructions
+  String _formatValue(double val) {
+    return val == val.truncateToDouble() ? val.toInt().toString() : val.toStringAsFixed(1);
+  }
+
+  /// Checks if a physical interaction by any player satisfies any active instruction in the room.
+  Future<void> verifyInteraction({
+    required String sessionId,
+    required GameControl control,
+    required double newValue,
+    required Map<dynamic, dynamic> playersData,
+    required List<GameControl> allRoomControls,
+  }) async {
+    // We iterate through all players because instructions are collaborative
+    for (var entry in playersData.entries) {
+      final String targetPlayerId = entry.key.toString();
+      final Map data = entry.value as Map;
+
+      // Does this control match the target_id of this player's instruction?
+      if (data['target_id'] == control.id) {
+        double targetVal = (data['target_value'] as num).toDouble();
+        
+        // --- PROXIMITY & FUZZY MATCHING ---
+        // Sliders and Dials have a small margin of error (epsilon) to account for touch sensitivity
+        double epsilon = (control.type == ControlType.slider || control.type == ControlType.dial) 
+            ? 0.05 
+            : 0.1;
+
+        if ((newValue - targetVal).abs() <= epsilon) {
+          // Interaction successful! Generate a new instruction for that specific player
+          await generateInstructionForPlayer(
+            sessionId, 
+            targetPlayerId, 
+            allRoomControls, 
+            playersData
+          );
+        }
+      }
+    }
+  }
+
+  /// Handles the penalty logic when a player's instruction timer runs out.
+  Future<void> handleInstructionTimeout(
+    String sessionId, 
+    String playerId, 
+    List<GameControl> allControls, 
+    Map<dynamic, dynamic> playersData,
+  ) async {
+    // 1. Log the failure globally for the team
+    await _firebaseService.incrementMissedCount(sessionId);
+
+    // 2. Clear the failed instruction and give them a new task
+    await generateInstructionForPlayer(
+      sessionId, 
+      playerId, 
+      allControls, 
+      playersData
     );
   }
 }
