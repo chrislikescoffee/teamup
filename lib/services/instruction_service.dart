@@ -72,7 +72,43 @@ class InstructionService {
         targetValue = 1.0;
         instructionText = "${targetControl.onAction} ${targetControl.label}";
         break;
+    
+      case ControlType.choice:
+        if (targetControl.options != null && targetControl.options!.isNotEmpty) {
+          // 1. Pick a random index (e.g., 1)
+          int optIndex = _random.nextInt(targetControl.options!.length);
+          
+          // 2. Set the targetValue to that index (e.g., 1.0)
+          targetValue = optIndex.toDouble();
+          
+          // 3. Set the text to the human-readable string (e.g., "STUN")
+          String targetLabel = targetControl.options![optIndex];
+          instructionText = "SET ${targetControl.label} TO $targetLabel";
+        }
+        break;
+
+        case ControlType.sequence:
+          // Calculate sequence length based on round: 
+          // Round 1-2: 3 digits, Round 3-4: 4 digits, etc.
+          int currentRound = (playersData.values.first['round_number'] ?? 1);
+          int sequenceLength = 2 + (currentRound / 2).ceil(); 
+          sequenceLength = sequenceLength.clamp(3, 6); // Cap at 6 digits
+
+          String code = "";
+          for (int i = 0; i < sequenceLength; i++) {
+            code += (1 + _random.nextInt(4)).toString(); // Using 1-4 for a 2x2 grid
+          }
+
+          targetValue = double.parse(code); 
+          // Format instruction as "1-2-3" for readability
+          String formattedCode = code.split('').join('-');
+          instructionText = "ENTER CODE $formattedCode ON ${targetControl.label}";
+          break;
+    
+    
     }
+
+    
 
     await _firebaseService.setPlayerInstruction(
       sessionId, 
@@ -83,13 +119,15 @@ class InstructionService {
     );
   }
 
+
+
   /// Helper to format numbers cleanly for instructions
   String _formatValue(double val) {
     return val == val.truncateToDouble() ? val.toInt().toString() : val.toStringAsFixed(1);
   }
 
   /// Checks if a physical interaction by any player satisfies any active instruction in the room.
-  Future<void> verifyInteraction({
+Future<void> verifyInteraction({
     required String sessionId,
     required GameControl control,
     required double newValue,
@@ -105,13 +143,30 @@ class InstructionService {
       if (data['target_id'] == control.id) {
         double targetVal = (data['target_value'] as num).toDouble();
         
-        // --- PROXIMITY & FUZZY MATCHING ---
-        // Sliders and Dials have a small margin of error (epsilon) to account for touch sensitivity
-        double epsilon = (control.type == ControlType.slider || control.type == ControlType.dial) 
-            ? 0.05 
-            : 0.1;
+        bool isMatch = false;
 
-        if ((newValue - targetVal).abs() <= epsilon) {
+        // --- MATCHING LOGIC ---
+        if (control.type == ControlType.choice || 
+            control.type == ControlType.toggle || 
+            control.type == ControlType.button) {
+          
+          // Discrete types: Use integer comparison to ensure "Stun" (1) matches target (1)
+          // This avoids issues where a double might be 0.9999999
+          isMatch = newValue.toInt() == targetVal.toInt();
+          
+        } else {
+          // Analog types: Proximity & Fuzzy matching for Sliders and Dials
+          // Sliders and Dials have a small margin of error (epsilon) to account for touch sensitivity
+          double epsilon = (control.type == ControlType.slider || control.type == ControlType.dial) 
+              ? 0.05 
+              : 0.1;
+          
+          isMatch = (newValue - targetVal).abs() <= epsilon;
+        }
+
+        if (isMatch) {
+          //debugPrint('DEBUG: Instruction Cleared for $targetPlayerId via ${control.label}');
+          
           // Interaction successful! Generate a new instruction for that specific player
           await generateInstructionForPlayer(
             sessionId, 

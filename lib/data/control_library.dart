@@ -36,5 +36,32 @@ class ControlLibrary {
       step: 1, 
       options: ['North', 'North-East', 'East', 'South-East', 'South', 'South-West', 'West', 'North-West'],
     ),
+
+    GameControl(id: 'phasers', type: ControlType.choice, label: 'Phaser Settings', options: ['Safe', 'Stun', 'Irritate', 'Kill']),
+    GameControl(id: 'rotation', type: ControlType.choice, label: 'Rotation Direction', options: ['Clockwise','Counterclockwise','Full wobbley'],),
+    GameControl(id: 'staff_level', type: ControlType.choice, label: 'Staffing Level', options: ['Low', 'Medium', 'High', 'Crowded'],),
+    GameControl(id: 'icecream_flavour', type: ControlType.choice, label: 'Ice Cream Flavour', options: ['Vanilla', 'Chocolate', 'Strawberry'],),
+
+    GameControl(
+      id: 'warp_core_entry', 
+      type: ControlType.sequence, 
+      label: 'WARP CORE KEYPAD',
+      options: ['1', '2', '3', '4', '5', '6', '7', '8', '9'],
+    ),
+
+    GameControl(
+      id: 'reactor_auth',
+      type: ControlType.sequence,
+      label: 'REACTOR AUTH',
+      options: ['Ω', 'Δ', 'Σ', 'Φ'], // 2x2 Greek symbols
+    ),
+
+    GameControl(
+      id: 'override_key',
+      type: ControlType.sequence,
+      label: 'OVERRIDE',
+      options: ['A', 'B', 'C', 'D'],
+    ),
+
   ];
 }

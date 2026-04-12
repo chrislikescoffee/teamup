@@ -143,7 +143,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Laboratory Access'),
+        title: const Text('TEAM UP'),
         actions: [
           IconButton(
             icon: const Icon(Icons.delete_sweep, color: Colors.redAccent),

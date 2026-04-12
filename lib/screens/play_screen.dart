@@ -83,7 +83,7 @@ class _PlayScreenState extends State<PlayScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text('Scientist: ${widget.localPlayerName}'),
+          title: Text('Player: ${widget.localPlayerName}'),
           centerTitle: true,
           leading: IconButton(
             icon: const Icon(Icons.exit_to_app),

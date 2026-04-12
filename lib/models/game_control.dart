@@ -1,4 +1,4 @@
-enum ControlType { toggle, slider, button, dial }
+enum ControlType { toggle, slider, button, dial, choice, sequence, }
 
 class GameControl {
   final String id;

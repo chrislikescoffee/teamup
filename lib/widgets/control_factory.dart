@@ -19,6 +19,13 @@ Widget controlFactory(
         },
       );
 
+    case ControlType.sequence:
+      return _SequencePad(
+        control: control,
+        onChanged: onChanged,
+        onComplete: onCommitted,
+      );
+
     case ControlType.slider:
     case ControlType.dial:
       String displayVal;
@@ -28,15 +35,16 @@ Widget controlFactory(
       } else {
         displayVal = control.value == control.value.truncateToDouble() 
             ? control.value.toInt().toString() 
-            : control.value.toString();
+            : control.value.toStringAsFixed(1);
         displayVal = "$displayVal${control.unit}";
       }
 
       if (control.type == ControlType.slider) {
         int divisions = ((control.max - control.min) / control.step).round();
         return Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text('${control.label} ($displayVal)'),
+            Text('${control.label} ($displayVal)', style: const TextStyle(fontWeight: FontWeight.bold)),
             Slider(
               value: control.value.clamp(control.min, control.max),
               min: control.min,
@@ -52,15 +60,16 @@ Widget controlFactory(
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 12.0),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Text('${control.label} ($displayVal)'),
+              Text('${control.label} ($displayVal)', style: const TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               RotaryDial(
                 value: control.value.clamp(control.min, control.max),
                 min: control.min,
                 max: control.max,
                 step: control.step,
-                options: control.options, // Pass the options down to the dial
+                options: control.options,
                 onChanged: onChanged,
                 onCommitted: onCommitted,
               ),
@@ -68,6 +77,38 @@ Widget controlFactory(
           ),
         );
       }
+
+    case ControlType.choice:
+      final List<String> options = control.options ?? [];
+      int selectedIndex = control.value.toInt().clamp(0, options.length - 1);
+
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(control.label, style: const TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.center,
+            children: List.generate(options.length, (index) {
+              bool isSelected = selectedIndex == index;
+              return ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isSelected ? Colors.cyanAccent : Colors.grey.shade800,
+                  foregroundColor: isSelected ? Colors.black : Colors.white,
+                ),
+                onPressed: () {
+                  double indexAsValue = index.toDouble();
+                  onChanged(indexAsValue);
+                  onCommitted(indexAsValue);
+                },
+                child: Text(options[index]),
+              );
+            }),
+          ),
+        ],
+      );
 
     case ControlType.button:
       return ElevatedButton(
@@ -147,26 +188,23 @@ class _RotaryDialState extends State<RotaryDial> {
 
   @override
   Widget build(BuildContext context) {
-    double normalized = (_currentValue - widget.min) / (widget.max - widget.min);
+    double normalized = (widget.max - widget.min) == 0 ? 0 : (_currentValue - widget.min) / (widget.max - widget.min);
     double angle = (-135 + (normalized * 270)) * (pi / 180);
 
     const double dialSize = 100.0;
-    const double boxSize = 220.0; // Total bounding box for the dial and text
-    const double radius = dialSize / 2 + 35.0; // Distance from center to text
+    const double boxSize = 220.0;
+    const double radius = dialSize / 2 + 35.0;
 
     List<Widget> children = [];
 
-    // 1. Draw the labels around the outside if they exist
     if (widget.options != null && widget.options!.isNotEmpty) {
       int numOptions = widget.options!.length;
       int selectedIndex = ((_currentValue - widget.min) / widget.step).round();
 
       for (int i = 0; i < numOptions; i++) {
-        // Calculate the angular sweep for this specific option
         double optNormalized = numOptions > 1 ? i / (numOptions - 1) : 0.0;
         double optAngle = (-135 + (optNormalized * 270)) * (pi / 180);
 
-        // Convert polar coordinates to Cartesian (x,y)
         double x = (boxSize / 2) + radius * sin(optAngle);
         double y = (boxSize / 2) - radius * cos(optAngle);
 
@@ -174,8 +212,8 @@ class _RotaryDialState extends State<RotaryDial> {
 
         children.add(
           Positioned(
-            left: x - 40, // Shift left by half the width to center it on the point
-            top: y - 15,  // Shift up by half the height to center it
+            left: x - 40,
+            top: y - 15,
             width: 80,
             height: 30,
             child: Center(
@@ -183,7 +221,7 @@ class _RotaryDialState extends State<RotaryDial> {
                 widget.options![i],
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 11,
+                  fontSize: 10,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                   color: isSelected ? Colors.orangeAccent : Colors.grey.shade500,
                 ),
@@ -194,7 +232,6 @@ class _RotaryDialState extends State<RotaryDial> {
       }
     }
 
-    // 2. Draw the interactive dial in the exact center
     children.add(
       Align(
         alignment: Alignment.center,
@@ -208,16 +245,8 @@ class _RotaryDialState extends State<RotaryDial> {
               shape: BoxShape.circle,
               color: Colors.grey.shade800,
               boxShadow: const [
-                BoxShadow(
-                  color: Colors.black54,
-                  blurRadius: 10.0,
-                  offset: Offset(4, 4),
-                ),
-                BoxShadow(
-                  color: Colors.white12,
-                  blurRadius: 10.0,
-                  offset: Offset(-4, -4),
-                ),
+                BoxShadow(color: Colors.black54, blurRadius: 10.0, offset: Offset(4, 4)),
+                BoxShadow(color: Colors.white12, blurRadius: 10.0, offset: Offset(-4, -4)),
               ],
             ),
             child: Transform.rotate(
@@ -258,6 +287,93 @@ class _RotaryDialState extends State<RotaryDial> {
       child: Stack(
         children: children,
       ),
+    );
+  }
+}
+
+class _SequencePad extends StatefulWidget {
+  final GameControl control;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double> onComplete;
+
+  const _SequencePad({required this.control, required this.onChanged, required this.onComplete});
+
+  @override
+  State<_SequencePad> createState() => _SequencePadState();
+}
+
+class _SequencePadState extends State<_SequencePad> {
+  String _currentInput = "";
+
+  void _handleTap(String char, int index) {
+    setState(() {
+      // For numeric comparison in InstructionService, we store the 1-based index
+      // so that 'A' becomes '1', 'B' becomes '2', etc.
+      _currentInput += (index + 1).toString();
+    });
+
+    int targetLength = widget.control.value.toInt().toString().length;
+    if (targetLength < 3) targetLength = 3; 
+
+    if (_currentInput.length >= targetLength) {
+      try {
+        double val = double.parse(_currentInput);
+        widget.onChanged(val);
+        widget.onComplete(val);
+      } catch (e) {
+        debugPrint("Error parsing sequence: $e");
+      }
+      
+      Future.delayed(const Duration(milliseconds: 600), () {
+        if (mounted) setState(() => _currentInput = "");
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final List<String> keypadChars = widget.control.options ?? ['1', '2', '3', '4'];
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(widget.control.label, style: const TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Text(
+          _currentInput.isEmpty ? "READY" : _currentInput.split('').map((char) {
+            // Display actual characters by looking up the index
+            int idx = int.parse(char) - 1;
+            return keypadChars[idx];
+          }).join(' '),
+          style: const TextStyle(color: Colors.cyanAccent, letterSpacing: 4, fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: 160, 
+          child: GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: keypadChars.length,
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: keypadChars.length > 4 ? 3 : 2, 
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+            ),
+            itemBuilder: (context, index) {
+              return ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blueGrey.shade800,
+                  foregroundColor: Colors.white,
+                  padding: EdgeInsets.zero,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: () => _handleTap(keypadChars[index], index),
+                child: Text(keypadChars[index], style: const TextStyle(fontSize: 18)),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
