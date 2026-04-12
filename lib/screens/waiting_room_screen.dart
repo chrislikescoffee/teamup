@@ -37,6 +37,36 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
     }
   }
 
+  // NEW: Confirmation Dialog for the Host
+  Future<void> _confirmStart(bool allReady) async {
+    if (allReady) {
+      _roomService.startNewGame(widget.sessionId);
+      return;
+    }
+
+    final bool? shouldStart = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Scientists Not Ready'),
+        content: const Text('Not all players are ready. Are you sure you want to start the mission?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('CANCEL'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('START ANYWAY', style: TextStyle(color: Colors.orange)),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldStart == true) {
+      _roomService.startNewGame(widget.sessionId);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -47,25 +77,21 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text('Room: ${widget.sessionId}'),
+          title: const Text('Waiting Room'),
           centerTitle: true,
-          leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: _handleExit),
+          actions: [
+            IconButton(icon: const Icon(Icons.logout), onPressed: _handleExit)
+          ],
         ),
         body: StreamBuilder(
           stream: _firebaseService.getGameStream(widget.sessionId),
           builder: (context, snapshot) {
-            if (snapshot.hasError) return const Center(child: Text('Connection Error'));
             if (!snapshot.hasData || snapshot.data!.snapshot.value == null) {
-              // If the room data is completely null, the host destroyed the room. Kick to lobby.
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LobbyScreen()));
-              });
-              return const Center(child: Text('Room closed.'));
+              return const Center(child: Text('Session Ended.'));
             }
 
             final sessionData = Map<dynamic, dynamic>.from(snapshot.data!.snapshot.value as Map);
             
-            // --- THE TRANSITION TRIGGER ---
             if (sessionData['status'] == 'playing') {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (mounted) {
@@ -82,21 +108,11 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
                   );
                 }
               });
-              return const Center(child: CircularProgressIndicator()); // Show loading while transitioning
+              return const Center(child: CircularProgressIndicator());
             }
-            // ------------------------------
 
-            // Parse Players
             final dynamic playersRaw = sessionData['players'];
             Map<dynamic, dynamic> playersData = playersRaw is Map ? playersRaw : {};
-            
-            // Check if WE were booted
-            if (!widget.isHost && !playersData.containsKey(widget.localPlayerId)) {
-               WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LobbyScreen()));
-              });
-              return const Center(child: Text('You were removed from the room.'));
-            }
 
             bool allReady = true;
             bool amIReady = false;
@@ -106,19 +122,17 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
               String pId = key.toString();
               Map pData = value as Map;
               bool ready = pData['isReady'] == true;
-              
               if (!ready) allReady = false;
               if (pId == widget.localPlayerId) amIReady = ready;
 
               playerTiles.add(
                 ListTile(
-                  leading: Icon(ready ? Icons.check_circle : Icons.hourglass_empty, color: ready ? Colors.green : Colors.grey),
+                  leading: Icon(ready ? Icons.check_circle : Icons.radio_button_unchecked, 
+                             color: ready ? Colors.green : Colors.grey),
                   title: Text(pData['name'] ?? 'Unknown'),
                   trailing: (widget.isHost && pId != widget.localPlayerId) 
-                    ? IconButton(
-                        icon: const Icon(Icons.remove_circle_outline, color: Colors.red),
-                        onPressed: () => _firebaseService.bootPlayer(widget.sessionId, pId),
-                      ) 
+                    ? IconButton(icon: const Icon(Icons.person_remove, color: Colors.red),
+                        onPressed: () => _firebaseService.bootPlayer(widget.sessionId, pId)) 
                     : null,
                 )
               );
@@ -126,32 +140,65 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
 
             return Column(
               children: [
-                const Padding(
-                  padding: EdgeInsets.all(16.0),
-                  child: Text('Waiting for Scientists...', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                ),
-                Expanded(
-                  child: ListView(children: playerTiles),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(32.0),
-                  child: widget.isHost 
-                    ? ElevatedButton(
-                        onPressed: () => _roomService.startNewGame(widget.sessionId), // Only the host can call this now!
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 16),
-                          backgroundColor: allReady ? Colors.blue : Colors.orange, // Orange hints at "Force Start"
-                        ),
-                        child: Text(allReady ? 'START GAME' : 'FORCE START', style: const TextStyle(fontSize: 20, color: Colors.white)),
-                      )
-                    : ElevatedButton(
-                        onPressed: () => _firebaseService.toggleReadyStatus(widget.sessionId, widget.localPlayerId, !amIReady),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 16),
-                          backgroundColor: amIReady ? Colors.grey : Colors.green,
-                        ),
-                        child: Text(amIReady ? 'UNREADY' : 'READY', style: const TextStyle(fontSize: 20, color: Colors.white)),
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  decoration: BoxDecoration(
+                    color: Colors.blueGrey.shade900,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    children: [
+                      const Text('ACCESS CODE', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                      const SizedBox(height: 8),
+                      Text(
+                        widget.sessionId,
+                        style: const TextStyle(color: Colors.white, fontSize: 48, fontWeight: FontWeight.bold, letterSpacing: 12),
                       ),
+                    ],
+                  ),
+                ),
+                const Divider(),
+                Expanded(child: ListView(children: playerTiles)),
+                
+                // UPDATED: Combined Host Control Area
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      // Both Host and Client now have the Ready Toggle
+                      SizedBox(
+                        width: double.infinity,
+                        height: 50,
+                        child: OutlinedButton.icon(
+                          icon: Icon(amIReady ? Icons.check : Icons.priority_high),
+                          label: Text(amIReady ? 'I AM READY' : 'SET READY STATUS'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: amIReady ? Colors.green : Colors.blue,
+                            side: BorderSide(color: amIReady ? Colors.green : Colors.blue),
+                          ),
+                          onPressed: () => _firebaseService.toggleReadyStatus(
+                            widget.sessionId, widget.localPlayerId, !amIReady
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      // Only Host sees the Start Mission button
+                      if (widget.isHost)
+                        SizedBox(
+                          width: double.infinity,
+                          height: 60,
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: allReady ? Colors.green : Colors.orange,
+                            ),
+                            onPressed: () => _confirmStart(allReady),
+                            child: const Text('START MISSION', style: TextStyle(fontSize: 18, color: Colors.white)),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ],
             );

@@ -2,6 +2,12 @@ import 'dart:math';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_core/firebase_core.dart';
 
+
+  String _generateRoomCode() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    Random rnd = Random();
+    return String.fromCharCodes(Iterable.generate(4, (_) => chars.codeUnitAt(rnd.nextInt(chars.length))));
+  }
 class FirebaseService {
   final DatabaseReference _dbRef = FirebaseDatabase.instanceFor(
     app: Firebase.app(),
@@ -10,20 +16,20 @@ class FirebaseService {
 
   // --- ROOM MANAGEMENT ---
 
-  String _generateRoomCode() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    Random rnd = Random();
-    return String.fromCharCodes(Iterable.generate(4, (_) => chars.codeUnitAt(rnd.nextInt(chars.length))));
-  }
+
 
   // Returns a map containing the new sessionId and the host's playerId
-  Future<Map<String, String>> createRoom(String playerName) async {
+ Future<Map<String, String>> createRoom(String playerName) async {
     String code = _generateRoomCode();
     final roomRef = _dbRef.child('sessions/$code');
+    
+    // Check if room exists (extremely unlikely with 5-char alphanumeric, but safe)
+    final existing = await roomRef.get();
+    if (existing.exists) return createRoom(playerName); // Recurse if collision
+
     final playerRef = roomRef.child('players').push();
     final playerId = playerRef.key!;
 
-    // SAFETY NET: If the host loses connection or crashes, wipe the entire room
     await roomRef.onDisconnect().remove();
 
     await roomRef.set({
@@ -34,7 +40,7 @@ class FirebaseService {
 
     await playerRef.set({
       'name': playerName,
-      'isReady': true, // Host is ready by default
+      'isReady': true,
     });
 
     return {'sessionId': code, 'playerId': playerId};
@@ -42,17 +48,20 @@ class FirebaseService {
 
   // Returns the assigned playerId, or throws an error if the room is invalid
   Future<String> joinRoom(String code, String playerName) async {
-    code = code.toUpperCase();
+    code = code.toUpperCase().trim();
     final roomRef = _dbRef.child('sessions/$code');
-    final snapshot = await roomRef.child('status').get();
+    final snapshot = await roomRef.get(); // Get the whole room to check existence
 
-    if (!snapshot.exists || snapshot.value != 'waiting') {
-      throw Exception("Room not found or game has already started.");
+    if (!snapshot.exists) {
+      throw Exception("Access code invalid. Room does not exist.");
+    }
+
+    final data = snapshot.value as Map;
+    if (data['status'] != 'waiting') {
+      throw Exception("Laboratory is currently in a live session.");
     }
 
     final playerRef = roomRef.child('players').push();
-    
-    // SAFETY NET: If a client drops, remove just them from the players list
     await playerRef.onDisconnect().remove();
 
     await playerRef.set({
@@ -134,4 +143,15 @@ class FirebaseService {
     if (snapshot.exists) return snapshot.value as Map<dynamic, dynamic>;
     return null;
   }
+
+  String _generateRoomCode() {
+    // Alphanumeric pool (excluding confusing characters like 0/O if desired, but kept standard here)
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; 
+    Random rnd = Random();
+    return String.fromCharCodes(
+      Iterable.generate(5, (_) => chars.codeUnitAt(rnd.nextInt(chars.length)))
+    );
+  }
+
+
 }

@@ -5,6 +5,7 @@ import '../services/firebase_service.dart';
 import '../services/instruction_service.dart';
 import '../widgets/animated_banner.dart';
 import 'lobby_screen.dart'; 
+import 'waiting_room_screen.dart'; // NEW: Required for returning to the lobby
 
 class PlayScreen extends StatefulWidget {
   final String sessionId;
@@ -28,17 +29,45 @@ class _PlayScreenState extends State<PlayScreen> {
   final FirebaseService _firebaseService = FirebaseService();
   final InstructionService _instructionService = InstructionService();
 
+  // UPDATED: Smart exit logic
   Future<void> _handleExit() async {
     if (widget.isHost) {
+      // 1. If host leaves, the nuclear option: delete everything
       await _firebaseService.deleteRoom(widget.sessionId);
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const LobbyScreen()),
+        );
+      }
     } else {
+      // 2. If client leaves, remove them and check if the room still exists
       await _firebaseService.leaveRoom(widget.sessionId, widget.localPlayerId);
-    }
-    if (mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const LobbyScreen()),
-      );
+      
+      if (!mounted) return;
+
+      final players = await _firebaseService.getPlayers(widget.sessionId);
+      
+      if (players == null) {
+        // Room is gone (Host disconnected)
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const LobbyScreen()),
+        );
+      } else {
+        // Room still exists, go back to the Waiting Room
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => WaitingRoomScreen(
+              sessionId: widget.sessionId,
+              localPlayerId: widget.localPlayerId,
+              localPlayerName: widget.localPlayerName,
+              isHost: false,
+            ),
+          ),
+        );
+      }
     }
   }
 
@@ -65,7 +94,7 @@ class _PlayScreenState extends State<PlayScreen> {
           builder: (context, snapshot) {
             if (snapshot.hasError) return Center(child: Text('Error: ${snapshot.error}'));
             
-            // If data becomes null, it means the room was deleted (likely by the host)
+            // AUTO-EXIT: If the stream detects the room was deleted while we are playing
             if (!snapshot.hasData || snapshot.data!.snapshot.value == null) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (mounted) {
@@ -75,7 +104,7 @@ class _PlayScreenState extends State<PlayScreen> {
                   );
                 }
               });
-              return const Center(child: Text('Connection Lost...'));
+              return const Center(child: Text('Laboratory Decommissioned...'));
             }
 
             final rawValue = snapshot.data!.snapshot.value;
