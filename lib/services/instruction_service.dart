@@ -19,7 +19,10 @@ class InstructionService {
       return;
     }
 
-    // 1. Pick a control with a bias towards other players' controls
+    // 1. Get the current target_id to prevent picking the same one twice
+    final String currentTargetId = playersData[playerId]?['target_id']?.toString() ?? '';
+
+    // 2. Pick a control with a bias towards other players' controls
     GameControl targetControl;
     int pickAttempts = 0;
     
@@ -30,7 +33,16 @@ class InstructionService {
       bool isMine = targetControl.ownerId == playerId;
       bool rollForSelf = _random.nextDouble() < GameConfig.chanceOfSelfInstruction;
       
-      if (!isMine || rollForSelf || pickAttempts > 15) {
+      // FIX: Ensure targetControl.id is NOT the same as the one we just finished
+      bool isRepeat = targetControl.id == currentTargetId;
+      
+      // FIX: Slider/Dial Safety Guard. If the range is 1.0 but it's a known multi-unit control,
+      // it means the stream hasn't updated the metadata yet. We retry picking.
+      bool isUnitMismatch = (targetControl.type == ControlType.slider || targetControl.type == ControlType.dial) && 
+                            (targetControl.max - targetControl.min == 1.0) && 
+                            (targetControl.unit.isNotEmpty);
+
+      if ((!isMine || rollForSelf || pickAttempts > 15) && !isRepeat && !isUnitMismatch) {
         break; 
       }
     } while (true);
@@ -86,8 +98,6 @@ class InstructionService {
           
           // Use a smaller movement threshold for dials than sliders (15%)
           double minDistance = range * 0.15; 
-          
-          // FIX: Ensure totalSteps is calculated and randomStep picks a valid increment
           int totalSteps = (range / targetControl.step).floor();
           
           do {
@@ -112,7 +122,6 @@ class InstructionService {
         int attempts = 0;
         
         double range = targetControl.max - targetControl.min;
-        // FIX: Ensure totalSteps is calculated correctly using floor
         int totalSteps = (range / targetControl.step).floor();
         double minDistance = range * GameConfig.sliderMinMovementPercent;
         

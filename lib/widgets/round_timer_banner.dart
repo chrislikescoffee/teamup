@@ -5,11 +5,14 @@ class RoundTimerBanner extends StatefulWidget {
   final int endTimestamp;
   final int totalDurationMs;
   final VoidCallback onFinished;
+  final bool isActive; // Added to control animation state
 
   const RoundTimerBanner({
     super.key,
     required this.endTimestamp,
-    required this.totalDurationMs,    required this.onFinished,
+    required this.totalDurationMs,
+    required this.onFinished,
+    this.isActive = true, // Default to true
   });
 
   @override
@@ -23,13 +26,28 @@ class _RoundTimerBannerState extends State<RoundTimerBanner> {
   @override
   void initState() {
     super.initState();
-    _startCountdown();
+    if (widget.isActive) {
+      _startCountdown();
+    }
+  }
+
+  @override
+  void didUpdateWidget(RoundTimerBanner oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Start the timer if it was inactive and is now active
+    if (widget.isActive && !oldWidget.isActive) {
+      _startCountdown();
+    } 
+    // Cancel the timer if it was active and is now inactive
+    else if (!widget.isActive && oldWidget.isActive) {
+      _timer?.cancel();
+    }
   }
 
   void _startCountdown() {
+    _timer?.cancel(); // Clear existing timer if any
     _timer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
       final now = DateTime.now().millisecondsSinceEpoch;
-      final totalDuration = 5 * 60 * 1000; // 5 minutes
       final remaining = widget.endTimestamp - now;
 
       if (remaining <= 0) {
@@ -58,7 +76,8 @@ class _RoundTimerBannerState extends State<RoundTimerBanner> {
       child: Stack(
         children: [
           LinearProgressIndicator(
-            value: _percent,
+            // If inactive, we show the bar as full (1.0) but static
+            value: widget.isActive ? _percent : 1.0,
             backgroundColor: Colors.grey.shade900,
             valueColor: AlwaysStoppedAnimation<Color>(
               _percent > 0.2 ? Colors.cyanAccent : Colors.redAccent,

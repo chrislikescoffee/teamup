@@ -31,7 +31,6 @@ class _PlayScreenState extends State<PlayScreen> {
   final FirebaseService _firebaseService = FirebaseService();
   final InstructionService _instructionService = InstructionService();
   
-  // Logic gate to prevent multiple navigation triggers or flickering during state changes
   bool _isTransitioning = false;
 
   Future<void> _handleExit() async {
@@ -155,9 +154,7 @@ class _PlayScreenState extends State<PlayScreen> {
             
             final String localInstruction = localPlayerData['current_instruction']?.toString() ?? 'Stand by...';
             
-            // --- UPDATED DATA EXTRACTION ---
             final int instructionDuration = (localPlayerData['instruction_duration'] as num? ?? 15).toInt();
-            final int instructionTimestamp = (localPlayerData['instruction_timestamp'] as num? ?? DateTime.now().millisecondsSinceEpoch).toInt();
             final String lastResult = localPlayerData['last_result']?.toString() ?? 'none';
 
             final dynamic controlsRaw = sessionData['controls'];
@@ -229,7 +226,7 @@ class _PlayScreenState extends State<PlayScreen> {
                 AnimatedInstructionBanner(
                   instruction: localInstruction,
                   durationInSeconds: instructionDuration,
-                  lastResult: lastResult, // Now correctly pulling from localPlayerData
+                  lastResult: lastResult,
                   onTimeExpired: () {
                     if (localInstruction.contains('CALIBRATING') || 
                         localInstruction.contains('GET READY') || 
@@ -327,16 +324,21 @@ class _PlayScreenState extends State<PlayScreen> {
                   ),
                 ),
 
-                if (roundEnd > 0 && !_isTransitioning)
-                  RoundTimerBanner(
+                // Always rendered to maintain UI layout, but visibility and animation depend on round status
+                Opacity(
+                  opacity: (roundEnd > 0 && !_isTransitioning) ? 1.0 : 0.0,
+                  child: RoundTimerBanner(
                     endTimestamp: roundEnd,
                     totalDurationMs: totalRoundDuration,
+                    // Prevent logic execution if the banner is "hidden"
+                    isActive: roundEnd > 0 && !_isTransitioning,
                     onFinished: () {
-                      if (widget.isHost && !_isTransitioning) {
+                      if (widget.isHost && !_isTransitioning && roundEnd > 0) {
                         _firebaseService.initializeRoom(widget.sessionId, {'status': 'success'});
                       }
                     },
                   ),
+                ),
               ],
             );
           },
