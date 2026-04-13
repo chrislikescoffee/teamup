@@ -7,7 +7,7 @@ class ControlLibrary {
     GameControl(id: 'shield', type: ControlType.toggle, label: 'Radiation Shield', onAction: 'Raise', offAction: 'Lower'),
     GameControl(id: 'coolant', type: ControlType.toggle, label: 'Coolant Pump', onAction: 'Activate', offAction: 'Deactivate'),
     GameControl(id: 'seatbelt', type: ControlType.toggle, label: 'Seatbelt', onAction: 'Fasten', offAction: 'Unfasten'),
-    GameControl(id: 'ewok_detector', type: ControlType.toggle, label: 'Ewok Detector', onAction: 'Scaning', offAction: 'Idle'),
+    GameControl(id: 'ewok_detector', type: ControlType.toggle, label: 'Ewok Detector', onAction: 'Engage', offAction: 'Turn off'),
     
     // Sliders with specific ranges
     GameControl(id: 'laser', type: ControlType.slider, label: 'Laser Intensity', min: 0, max: 100, step: 10, unit: '%'),
@@ -22,9 +22,9 @@ class ControlLibrary {
     GameControl(id: 'Acknowledge_warnings', type: ControlType.button, label: 'Warnings', onAction: 'Acknowledge'),
 
     // Dials
-    GameControl(id: 'frequency', type: ControlType.dial, label: 'Signal Frequency', min: 80, max: 120, step: 1, unit: ' MHz'),
+    GameControl(id: 'frequency', type: ControlType.dial, label: 'Signal Frequency', min: 80, max: 120, step: 15, unit: ' MHz'),
     GameControl(id: 'voltage', type: ControlType.dial, label: 'Grid Voltage', min: 0, max: 240, step: 20, unit: 'V'),
-    GameControl(id: 'radio_volume', type: ControlType.dial, label: 'Radio Volume', min: 1, max: 11, step: 1, unit: 'Loudness'),
+    GameControl(id: 'radio_volume', type: ControlType.dial, label: 'Radio Volume', min: 1, max: 11, step: 1, unit: ' Loudness'),
 
     // Compass Dial
     GameControl(
@@ -37,10 +37,14 @@ class ControlLibrary {
       options: ['North', 'North-East', 'East', 'South-East', 'South', 'South-West', 'West', 'North-West'],
     ),
 
+    // Choice Controls
+
     GameControl(id: 'phasers', type: ControlType.choice, label: 'Phaser Settings', options: ['Safe', 'Stun', 'Irritate', 'Kill']),
     GameControl(id: 'rotation', type: ControlType.choice, label: 'Rotation Direction', options: ['Clockwise','Counterclockwise','Full wobbley'],),
     GameControl(id: 'staff_level', type: ControlType.choice, label: 'Staffing Level', options: ['Low', 'Medium', 'High', 'Crowded'],),
     GameControl(id: 'icecream_flavour', type: ControlType.choice, label: 'Ice Cream Flavour', options: ['Vanilla', 'Chocolate', 'Strawberry'],),
+
+    // Sequence Controls
 
     GameControl(
       id: 'warp_core_entry', 

@@ -96,12 +96,10 @@ class _PlayScreenState extends State<PlayScreen> {
           builder: (context, snapshot) {
             if (snapshot.hasError) return Center(child: Text('Error: ${snapshot.error}'));
             
-            // 1. Wait for the stream to initialize to prevent the "Lobby Bounce"
             if (snapshot.connectionState == ConnectionState.waiting && !_isTransitioning) {
               return const Center(child: CircularProgressIndicator());
             }
 
-            // 2. Only redirect if the session is genuinely missing after connection is active
             if (!snapshot.hasData || snapshot.data!.snapshot.value == null) {
               if (snapshot.connectionState == ConnectionState.active && !_isTransitioning) {
                 _isTransitioning = true;
@@ -123,8 +121,6 @@ class _PlayScreenState extends State<PlayScreen> {
             final sessionData = Map<dynamic, dynamic>.from(rawValue);
             final String status = sessionData['status'] ?? 'playing';
 
-            // --- 3. THE FIX: SUCCESS STATE DETECTION ---
-            // If the host has updated the status to 'success', everyone transitions once.
             if (status == 'success' && !_isTransitioning) {
               _isTransitioning = true;
               WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -146,11 +142,9 @@ class _PlayScreenState extends State<PlayScreen> {
               return const Center(child: Text('MISSION COMPLETE\nPREPARING DEBRIEF...'));
             }
 
-            // Normal Gameplay Data Parsing
             final int missedCount = (sessionData['missed_count'] as num?)?.toInt() ?? 0;
             final int roundNumber = (sessionData['round_number'] as num? ?? 1).toInt();
             final int roundEnd = (sessionData['round_end_timestamp'] as num? ?? 0).toInt();
-            final int instructionDuration = (sessionData['instruction_duration'] as num? ?? 15).toInt();
             final int totalRoundDuration = (sessionData['round_duration_ms'] as num? ?? 120000).toInt();
 
             final dynamic playersRaw = sessionData['players'];
@@ -160,6 +154,10 @@ class _PlayScreenState extends State<PlayScreen> {
             final Map<dynamic, dynamic> localPlayerData = localPlayerDataRaw is Map ? localPlayerDataRaw : {};
             
             final String localInstruction = localPlayerData['current_instruction']?.toString() ?? 'Stand by...';
+            
+            // --- UPDATED DATA EXTRACTION ---
+            final int instructionDuration = (localPlayerData['instruction_duration'] as num? ?? 15).toInt();
+            final int instructionTimestamp = (localPlayerData['instruction_timestamp'] as num? ?? DateTime.now().millisecondsSinceEpoch).toInt();
 
             final dynamic controlsRaw = sessionData['controls'];
             List<GameControl> activeControls = [];
@@ -226,25 +224,26 @@ class _PlayScreenState extends State<PlayScreen> {
                     style: const TextStyle(color: Colors.white, fontSize: 16),
                   ),
                 ),
-                AnimatedInstructionBanner(
-                  instruction: localInstruction,
-                  durationInSeconds: instructionDuration,
-                  onTimeExpired: () {
-                    if (localInstruction.contains('CALIBRATING') || 
-                        localInstruction.contains('GET READY') || 
-                        localInstruction.contains('STAND BY') || 
-                        localInstruction.contains('ONLINE') ||
-                        _isTransitioning) {
-                      return;
-                    }
-                    _instructionService.handleInstructionTimeout(
-                      widget.sessionId, 
-                      widget.localPlayerId, 
-                      allRoomControls, 
-                      playersData
-                    );
-                  },
-                ),
+                
+          AnimatedInstructionBanner(
+            instruction: localInstruction,
+            durationInSeconds: instructionDuration, // Corrected parameter name
+            onTimeExpired: () {
+              if (localInstruction.contains('CALIBRATING') || 
+                  localInstruction.contains('GET READY') || 
+                  localInstruction.contains('STAND BY') || 
+                  localInstruction.contains('ONLINE') ||
+                  _isTransitioning) {
+                return;
+              }
+              _instructionService.handleInstructionTimeout(
+                widget.sessionId, 
+                widget.localPlayerId, 
+                allRoomControls, 
+                playersData
+              );
+            },
+          ),
                 const Divider(height: 1),
                 
                 Expanded(
@@ -332,7 +331,6 @@ class _PlayScreenState extends State<PlayScreen> {
                     totalDurationMs: totalRoundDuration,
                     onFinished: () {
                       if (widget.isHost && !_isTransitioning) {
-                        // Only the Host updates the DB; the StreamBuilder handles navigation for everyone
                         _firebaseService.initializeRoom(widget.sessionId, {'status': 'success'});
                       }
                     },

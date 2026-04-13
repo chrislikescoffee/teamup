@@ -95,7 +95,7 @@ Widget controlFactory(
               bool isSelected = selectedIndex == index;
               return ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: isSelected ? Colors.cyanAccent : Colors.grey.shade800,
+                  backgroundColor: isSelected ? Colors.orangeAccent : Colors.grey.shade800,
                   foregroundColor: isSelected ? Colors.black : Colors.white,
                 ),
                 onPressed: () {
@@ -296,7 +296,11 @@ class _SequencePad extends StatefulWidget {
   final ValueChanged<double> onChanged;
   final ValueChanged<double> onComplete;
 
-  const _SequencePad({required this.control, required this.onChanged, required this.onComplete});
+  const _SequencePad({
+    required this.control, 
+    required this.onChanged, 
+    required this.onComplete
+  });
 
   @override
   State<_SequencePad> createState() => _SequencePadState();
@@ -305,29 +309,49 @@ class _SequencePad extends StatefulWidget {
 class _SequencePadState extends State<_SequencePad> {
   String _currentInput = "";
 
+  @override
+  void didUpdateWidget(covariant _SequencePad oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    
+    // IF THE TARGET VALUE IN THE DATABASE CHANGES:
+    // This means the InstructionService has acknowledged a success 
+    // and assigned a new task. We should clear the pad now.
+    if (oldWidget.control.value != widget.control.value) {
+      setState(() {
+        _currentInput = "";
+      });
+    }
+  }
+
   void _handleTap(String char, int index) {
     setState(() {
-      // For numeric comparison in InstructionService, we store the 1-based index
-      // so that 'A' becomes '1', 'B' becomes '2', etc.
       _currentInput += (index + 1).toString();
     });
 
+    // We calculate the length of the code we are currently typing towards
     int targetLength = widget.control.value.toInt().toString().length;
     if (targetLength < 3) targetLength = 3; 
 
+    // Once we reach the length, we submit it for verification
     if (_currentInput.length >= targetLength) {
       try {
         double val = double.parse(_currentInput);
         widget.onChanged(val);
         widget.onComplete(val);
+        
+        // AUTO-RESET REMOVED FROM HERE:
+        // We no longer clear here. If the code is wrong, it stays on screen.
+        // If it is correct, 'didUpdateWidget' will catch the change and clear it.
       } catch (e) {
         debugPrint("Error parsing sequence: $e");
       }
-      
-      Future.delayed(const Duration(milliseconds: 600), () {
-        if (mounted) setState(() => _currentInput = "");
-      });
     }
+  }
+
+  void _clearInput() {
+    setState(() {
+      _currentInput = "";
+    });
   }
 
   @override
@@ -339,13 +363,30 @@ class _SequencePadState extends State<_SequencePad> {
       children: [
         Text(widget.control.label, style: const TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
-        Text(
-          _currentInput.isEmpty ? "READY" : _currentInput.split('').map((char) {
-            // Display actual characters by looking up the index
-            int idx = int.parse(char) - 1;
-            return keypadChars[idx];
-          }).join(' '),
-          style: const TextStyle(color: Colors.cyanAccent, letterSpacing: 4, fontSize: 18, fontWeight: FontWeight.bold),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(width: 48), 
+            Expanded(
+              child: Text(
+                _currentInput.isEmpty ? "READY" : _currentInput.split('').map((char) {
+                  int idx = int.parse(char) - 1;
+                  return keypadChars[idx];
+                }).join(' '),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.orange, 
+                  letterSpacing: 4, 
+                  fontSize: 18, 
+                  fontWeight: FontWeight.bold
+                ),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.backspace_outlined, color: Colors.redAccent, size: 20),
+              onPressed: _currentInput.isEmpty ? null : _clearInput,
+            ),
+          ],
         ),
         const SizedBox(height: 12),
         SizedBox(

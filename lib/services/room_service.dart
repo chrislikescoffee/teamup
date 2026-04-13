@@ -4,6 +4,7 @@ import '../models/game_control.dart';
 import '../data/control_library.dart';
 import 'firebase_service.dart';
 import 'instruction_service.dart';
+import '../config/game_config.dart';
 
 class RoomService {
   final FirebaseService _firebaseService = FirebaseService();
@@ -17,13 +18,23 @@ class RoomService {
     int currentRound = (sessionData['round_number'] as num? ?? 0).toInt();
     int nextRound = currentRound == 0 ? 1 : currentRound + 1;
 
-    // --- DIFFICULTY SCALING ALGORITHM ---
-    // Controls: Start at 3, add 1 every 2 rounds, max out at 8.
+    // --- DIFFICULTY SCALING VIA GAMECONFIG ---
     int controlsPerPlayer = (3 + (nextRound / 2).floor()).clamp(3, 8);
     
-    // Instruction Speed: Start at 15s, reduce by 1s every round, floor at 5s.
-    int instructionSeconds = (16 - nextRound).clamp(5, 15);
-    // ------------------------------------
+    int instructionSeconds = GameConfig.initialInstructionSeconds - 
+        (nextRound ~/ GameConfig.instructionDecrementInterval);
+    instructionSeconds = instructionSeconds.clamp(
+      GameConfig.minInstructionSeconds, 
+      GameConfig.initialInstructionSeconds
+    );
+
+    int roundDurationMs = GameConfig.initialRoundDurationMs - 
+        ((nextRound - 1) * GameConfig.roundDurationDecrementMs);
+    roundDurationMs = roundDurationMs.clamp(
+      GameConfig.minRoundDurationMs, 
+      GameConfig.initialRoundDurationMs
+    );
+    // -----------------------------------------
 
     final dynamic playersRaw = sessionData['players'];
     if (playersRaw == null || playersRaw is! Map) return;
@@ -40,10 +51,14 @@ class RoomService {
       for (int i = 0; i < controlsPerPlayer; i++) {
         if (poolIndex >= pool.length) break; 
         final item = pool[poolIndex];
+        
+        // Use the helper method defined below
+        double initialValue = _getRandomStartingValue(item);
+
         controlsMap[item.id] = {
           'label': item.label,
           'type': item.type.name,
-          'value': 0.0,
+          'value': initialValue,
           'onAction': item.onAction,
           'offAction': item.offAction,
           'min': item.min,
@@ -64,6 +79,7 @@ class RoomService {
         value['target_id'] = '';
         value['target_value'] = -1.0;
         value['isReady'] = false;
+        value['round_number'] = nextRound; 
       }
     });
 
@@ -75,16 +91,20 @@ class RoomService {
       'instruction_duration': instructionSeconds,
       'players': updatedPlayers, 
       'round_end_timestamp': 0,
+      'round_duration_ms': roundDurationMs,
     });
 
-    List<GameControl> allAssignedControls = [];
+List<GameControl> allAssignedControls = [];
     controlsMap.forEach((key, data) {
       allAssignedControls.add(GameControl(
         id: key,
         type: ControlType.values.byName(data['type']),
         label: data['label'],
         ownerId: data['ownerId'],
+        value: (data['value'] as num).toDouble(), 
         options: data['options'] != null ? List<String>.from(data['options']) : null,
+        onAction: data['onAction'] ?? 'ON',
+        offAction: data['offAction'] ?? 'OFF',
       ));
     });
 
@@ -94,14 +114,11 @@ class RoomService {
       await _firebaseService.setPlayerInstruction(sessionId, pId, 'GET READY', '', -1.0);
     }
     
-    await Future.delayed(Duration(seconds: instructionSeconds));
+    await Future.delayed(const Duration(seconds: 3));
 
-    const int roundDurationMs = 2 * 60 * 1000; 
     final int endTime = DateTime.now().millisecondsSinceEpoch + roundDurationMs;
-    
     await _firebaseService.initializeRoom(sessionId, {
       'round_end_timestamp': endTime,
-      'round_duration_ms': roundDurationMs,
     });
 
     for (String pId in playerIds) {
@@ -111,6 +128,33 @@ class RoomService {
         allAssignedControls,
         updatedPlayers,
       );
+    }
+  }
+
+  // --- HELPER METHOD (Moved outside of startNewGame) ---
+  double _getRandomStartingValue(GameControl control) {
+    final random = Random();
+    
+    switch (control.type) {
+      case ControlType.toggle:
+        return random.nextBool() ? 1.0 : 0.0;
+        
+      case ControlType.choice:
+      case ControlType.dial:
+        if (control.options != null && control.options!.isNotEmpty) {
+          return random.nextInt(control.options!.length).toDouble();
+        }
+        return 0.0;
+        
+      case ControlType.slider:
+        double range = control.max - control.min;
+        int steps = (range / control.step).round();
+        return control.min + (random.nextInt(steps + 1) * control.step);
+        
+      case ControlType.button:
+      case ControlType.sequence:
+      default:
+        return 0.0;
     }
   }
 }
