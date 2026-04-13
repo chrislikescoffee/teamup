@@ -239,6 +239,9 @@ class InstructionService {
         }
 
         if (isMatch) {
+          // WAIT FOR SUCCESS FLASH before generating new instruction
+          await Future.delayed(const Duration(milliseconds: GameConfig.feedbackAnimationMs));
+
           await generateInstructionForPlayer(
             sessionId, 
             targetPlayerId, 
@@ -258,6 +261,10 @@ class InstructionService {
   ) async {
     debugPrint('DEBUG: Instruction Timeout for $playerId. Punishing team.');
     await _firebaseService.incrementMissedCount(sessionId);
+    
+    // WAIT FOR FAIL FLASH before generating new instruction
+    await Future.delayed(const Duration(milliseconds: GameConfig.feedbackAnimationMs));
+
     await generateInstructionForPlayer(
       sessionId, 
       playerId, 

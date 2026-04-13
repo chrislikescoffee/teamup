@@ -82,19 +82,28 @@ class _AnimatedInstructionBannerState extends State<AnimatedInstructionBanner> w
     _flashController.forward(from: 0.0);
   }
 
-  @override
+@override
   void didUpdateWidget(AnimatedInstructionBanner oldWidget) {
     super.didUpdateWidget(oldWidget);
     
     if (oldWidget.instruction != widget.instruction) {
-      // If we aren't at the very start of the game, flash green for success
-      if (oldWidget.instruction != "STAND BY" && 
-          oldWidget.instruction != "GET READY" &&
-          !widget.instruction.contains("CALIBRATING")) {
+      // 1. Identify if the PREVIOUS state was a valid instruction that was just completed.
+      // We don't want to flash green when moving from "GET READY" to the first task.
+      bool wasActiveGameTask = !oldWidget.instruction.contains("STAND BY") && 
+                               !oldWidget.instruction.contains("GET READY") &&
+                               !oldWidget.instruction.contains("CALIBRATING") &&
+                               oldWidget.instruction.isNotEmpty;
+
+      // 2. Identify if the NEW state is a valid instruction (not an error or setup)
+      bool isNewGameTask = !widget.instruction.contains("STAND BY") && 
+                           !widget.instruction.contains("GET READY") &&
+                           !widget.instruction.contains("CALIBRATING");
+
+      if (wasActiveGameTask && isNewGameTask) {
         _triggerFlash(Colors.green);
       }
 
-      // Reset timer for new instruction
+      // Reset timer for the new instruction regardless of flash
       _timerController.duration = Duration(seconds: widget.durationInSeconds);
       _timerController.reverse(from: 1.0);
     }
