@@ -158,6 +158,7 @@ class _PlayScreenState extends State<PlayScreen> {
             // --- UPDATED DATA EXTRACTION ---
             final int instructionDuration = (localPlayerData['instruction_duration'] as num? ?? 15).toInt();
             final int instructionTimestamp = (localPlayerData['instruction_timestamp'] as num? ?? DateTime.now().millisecondsSinceEpoch).toInt();
+            final String lastResult = localPlayerData['last_result']?.toString() ?? 'none';
 
             final dynamic controlsRaw = sessionData['controls'];
             List<GameControl> activeControls = [];
@@ -225,25 +226,26 @@ class _PlayScreenState extends State<PlayScreen> {
                   ),
                 ),
                 
-          AnimatedInstructionBanner(
-            instruction: localInstruction,
-            durationInSeconds: instructionDuration, // Corrected parameter name
-            onTimeExpired: () {
-              if (localInstruction.contains('CALIBRATING') || 
-                  localInstruction.contains('GET READY') || 
-                  localInstruction.contains('STAND BY') || 
-                  localInstruction.contains('ONLINE') ||
-                  _isTransitioning) {
-                return;
-              }
-              _instructionService.handleInstructionTimeout(
-                widget.sessionId, 
-                widget.localPlayerId, 
-                allRoomControls, 
-                playersData
-              );
-            },
-          ),
+                AnimatedInstructionBanner(
+                  instruction: localInstruction,
+                  durationInSeconds: instructionDuration,
+                  lastResult: lastResult, // Now correctly pulling from localPlayerData
+                  onTimeExpired: () {
+                    if (localInstruction.contains('CALIBRATING') || 
+                        localInstruction.contains('GET READY') || 
+                        localInstruction.contains('STAND BY') || 
+                        localInstruction.contains('ONLINE') ||
+                        _isTransitioning) {
+                      return;
+                    }
+                    _instructionService.handleInstructionTimeout(
+                      widget.sessionId, 
+                      widget.localPlayerId, 
+                      allRoomControls, 
+                      playersData
+                    );
+                  },
+                ),
                 const Divider(height: 1),
                 
                 Expanded(

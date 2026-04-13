@@ -48,7 +48,6 @@ class InstructionService {
     switch (targetControl.type) {
       case ControlType.toggle:
         // Use a 0.5 threshold to determine if it is currently ON or OFF.
-        // This prevents floating point errors (e.g., 0.999 vs 1.0).
         bool currentlyOn = targetControl.value > 0.5;
         
         // Force the target to be the absolute opposite.
@@ -65,7 +64,7 @@ class InstructionService {
       case ControlType.choice:
       case ControlType.dial:
         if (targetControl.options != null && targetControl.options!.isNotEmpty) {
-          // --- CATEGORICAL DIAL (e.g., Navigation Heading) ---
+          // --- CATEGORICAL DIAL ---
           int currentIndex = targetControl.value.toInt();
           int newIndex;
           int attempts = 0;
@@ -79,7 +78,7 @@ class InstructionService {
           instructionText = "SET ${targetControl.label} TO $targetLabel";
           debugPrint('DEBUG: Categorical Dial/Choice logic applied for ${targetControl.label}');
         } else {
-          // --- NUMERICAL DIAL (e.g., Signal Frequency, Grid Voltage) ---
+          // --- NUMERICAL DIAL ---
           double currentValue = targetControl.value;
           double newValue;
           int attempts = 0;
@@ -88,9 +87,12 @@ class InstructionService {
           // Use a smaller movement threshold for dials than sliders (15%)
           double minDistance = range * 0.15; 
           
+          // FIX: Ensure totalSteps is calculated and randomStep picks a valid increment
+          int totalSteps = (range / targetControl.step).floor();
+          
           do {
-            int steps = (range / targetControl.step).round();
-            newValue = targetControl.min + (_random.nextInt(steps + 1) * targetControl.step);
+            int randomStep = _random.nextInt(totalSteps + 1);
+            newValue = targetControl.min + (randomStep * targetControl.step);
             attempts++;
           } while ((newValue - currentValue).abs() < minDistance && attempts < 20);
           
@@ -109,39 +111,30 @@ class InstructionService {
         double newValue;
         int attempts = 0;
         
-        // 1. Calculate range and total steps based on the control's actual scale
         double range = targetControl.max - targetControl.min;
-        int totalSteps = (range / targetControl.step).round();
-        
-        // 2. Minimum distance to ensure the player actually has to move it
+        // FIX: Ensure totalSteps is calculated correctly using floor
+        int totalSteps = (range / targetControl.step).floor();
         double minDistance = range * GameConfig.sliderMinMovementPercent;
         
         do {
-          // 3. Pick a random step and map it back to the real scale (min to max)
           int randomStep = _random.nextInt(totalSteps + 1);
           newValue = targetControl.min + (randomStep * targetControl.step);
           attempts++;
-          
-          // Safety break to prevent infinite loops if the range is too small
           if (attempts > 30) break;
         } while ((newValue - currentValue).abs() < minDistance);
         
         targetValue = newValue;
-        
-        // 4. Formatting: Ensure we don't show "0.6000000000000001"
-        // truncateToDouble check handles clean integers vs decimals
         String display = targetValue == targetValue.truncateToDouble() 
             ? targetValue.toInt().toString() 
             : targetValue.toStringAsFixed(1);
             
         instructionText = "ADJUST ${targetControl.label} TO $display${targetControl.unit}";
-        
         debugPrint('DEBUG SLIDER: ${targetControl.label} | Range: ${targetControl.min}-${targetControl.max} | New Target: $targetValue');
         break;
 
       case ControlType.sequence:
         int sequenceLength = GameConfig.minSequenceLength + 
-            (currentRound / GameConfig.roundsPerSequenceScaling).ceil();
+            (currentRound ~/ GameConfig.roundsPerSequenceScaling);
         sequenceLength = sequenceLength.clamp(GameConfig.minSequenceLength, GameConfig.maxSequenceLength);
 
         String displayCode = "";
@@ -226,28 +219,37 @@ class InstructionService {
             control.type == ControlType.choice) {
           
           isMatch = newValue.round() == targetVal.round();
-          
-          if (isMatch) {
-            debugPrint('DEBUG: Strict match successful for $targetPlayerId on ${control.label}');
-          }
         } else {
           double epsilon = GameConfig.analogEpsilon;
           isMatch = (newValue - targetVal).abs() <= epsilon;
-          if (isMatch) {
-            debugPrint('DEBUG: Fuzzy match successful for $targetPlayerId on ${control.label}');
-          }
         }
 
         if (isMatch) {
-          // WAIT FOR SUCCESS FLASH before generating new instruction
+          debugPrint('DEBUG: Match found for $targetPlayerId. Locking interaction.');
+
+          // 1. IMMEDIATELY update Firebase to block further matches
+          await _firebaseService.initializeRoom(sessionId, {
+            'players/$targetPlayerId/target_id': 'PROCESSING',
+            'players/$targetPlayerId/last_result': 'success',
+          });
+
+          // 2. WAIT for the feedback animation to finish
           await Future.delayed(const Duration(milliseconds: GameConfig.feedbackAnimationMs));
 
+          // 3. GENERATE the new instruction
           await generateInstructionForPlayer(
             sessionId, 
             targetPlayerId, 
             allRoomControls, 
             playersData
           );
+          
+          await _firebaseService.initializeRoom(sessionId, {
+            'players/$targetPlayerId/last_result': 'none',
+          });
+
+          // 4. CRITICAL FIX: Return early. 
+          return; 
         }
       }
     }
@@ -262,7 +264,11 @@ class InstructionService {
     debugPrint('DEBUG: Instruction Timeout for $playerId. Punishing team.');
     await _firebaseService.incrementMissedCount(sessionId);
     
-    // WAIT FOR FAIL FLASH before generating new instruction
+    await _firebaseService.initializeRoom(sessionId, {
+      'players/$playerId/target_id': 'FAILED',
+      'players/$playerId/last_result': 'fail',
+    });
+
     await Future.delayed(const Duration(milliseconds: GameConfig.feedbackAnimationMs));
 
     await generateInstructionForPlayer(
@@ -271,5 +277,9 @@ class InstructionService {
       allRoomControls, 
       playersData
     );
+
+    await _firebaseService.initializeRoom(sessionId, {
+      'players/$playerId/last_result': 'none',
+    });
   }
 }

@@ -4,12 +4,14 @@ import '../config/game_config.dart';
 class AnimatedInstructionBanner extends StatefulWidget {
   final String instruction;
   final int durationInSeconds;
+  final String lastResult; // New parameter to drive the flash logic
   final VoidCallback onTimeExpired;
 
   const AnimatedInstructionBanner({
     super.key,
     required this.instruction,
     required this.durationInSeconds,
+    required this.lastResult,
     required this.onTimeExpired,
   });
 
@@ -56,7 +58,8 @@ class _AnimatedInstructionBannerState extends State<AnimatedInstructionBanner> w
 
     _timerController.addStatusListener((status) {
       if (status == AnimationStatus.dismissed) {
-        _triggerFlash(Colors.red); // Flash red on timeout
+        // Note: The InstructionService now handles signaling 'fail' to the DB,
+        // which triggers the flash via didUpdateWidget.
         widget.onTimeExpired();
       }
     });
@@ -82,28 +85,26 @@ class _AnimatedInstructionBannerState extends State<AnimatedInstructionBanner> w
     _flashController.forward(from: 0.0);
   }
 
-@override
+  @override
   void didUpdateWidget(AnimatedInstructionBanner oldWidget) {
     super.didUpdateWidget(oldWidget);
-    
-    if (oldWidget.instruction != widget.instruction) {
-      // 1. Identify if the PREVIOUS state was a valid instruction that was just completed.
-      // We don't want to flash green when moving from "GET READY" to the first task.
-      bool wasActiveGameTask = !oldWidget.instruction.contains("STAND BY") && 
-                               !oldWidget.instruction.contains("GET READY") &&
-                               !oldWidget.instruction.contains("CALIBRATING") &&
-                               oldWidget.instruction.isNotEmpty;
 
-      // 2. Identify if the NEW state is a valid instruction (not an error or setup)
-      bool isNewGameTask = !widget.instruction.contains("STAND BY") && 
-                           !widget.instruction.contains("GET READY") &&
-                           !widget.instruction.contains("CALIBRATING");
-
-      if (wasActiveGameTask && isNewGameTask) {
+    // 1. Trigger Flash based on the 'lastResult' signal from InstructionService
+    if (oldWidget.lastResult != widget.lastResult) {
+      if (widget.lastResult == 'success') {
+        _timerController.stop(); // Stop the countdown during success flash
         _triggerFlash(Colors.green);
+      } else if (widget.lastResult == 'fail') {
+        _timerController.stop(); // Stop the countdown during fail flash
+        _triggerFlash(Colors.red);
+      } else if (widget.lastResult == 'none' && oldWidget.lastResult != 'none') {
+        // If we transitioned back to 'none' but the instruction is still the same, 
+        // you could resume here, but usually, a new instruction follows immediately.
       }
+    }
 
-      // Reset timer for the new instruction regardless of flash
+    // 2. Handle standard instruction/timer reset
+    if (oldWidget.instruction != widget.instruction) {
       _timerController.duration = Duration(seconds: widget.durationInSeconds);
       _timerController.reverse(from: 1.0);
     }
@@ -129,7 +130,7 @@ class _AnimatedInstructionBannerState extends State<AnimatedInstructionBanner> w
               height: 75,
               color: Colors.grey.shade900,
             ),
-            
+
             // 2. Shrinking Progress Bar
             Align(
               alignment: Alignment.centerLeft,
