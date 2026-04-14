@@ -5,6 +5,7 @@ class GameConfig {
   static const int initialRoundDurationMs = 60000; // 2 Minutes
   static const int minRoundDurationMs = 45000;      // Floor of 45 seconds
   static const int roundDurationDecrementMs = 15000; // Time lost per round level
+  static const int initialLives = 10;
 
   // --- INSTRUCTION SETTINGS ---
   static const int initialInstructionSeconds = 15;

@@ -5,9 +5,11 @@ import '../services/firebase_service.dart';
 import '../services/instruction_service.dart';
 import '../widgets/animated_banner.dart';
 import '../widgets/round_timer_banner.dart';
+import '../config/game_config.dart';
 import 'lobby_screen.dart'; 
 import 'waiting_room_screen.dart';
 import 'success_screen.dart';
+import 'fail_screen.dart';
 
 class PlayScreen extends StatefulWidget {
   final String sessionId;
@@ -27,11 +29,38 @@ class PlayScreen extends StatefulWidget {
   State<PlayScreen> createState() => _PlayScreenState();
 }
 
-class _PlayScreenState extends State<PlayScreen> {
+class _PlayScreenState extends State<PlayScreen> with SingleTickerProviderStateMixin {
   final FirebaseService _firebaseService = FirebaseService();
   final InstructionService _instructionService = InstructionService();
   
   bool _isTransitioning = false;
+
+  late AnimationController _flashController;
+  late Animation<double> _flashOpacity;
+
+  @override
+  void initState() {
+    super.initState();
+    _flashController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _flashOpacity = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 0.0, end: 1.0), weight: 50),
+      TweenSequenceItem(tween: Tween(begin: 1.0, end: 0.0), weight: 50),
+    ]).animate(_flashController);
+  }
+
+  @override
+  void dispose() {
+    _flashController.dispose();
+    super.dispose();
+  }
+
+  Color _getLivesColor(int currentLives) {
+    double t = (currentLives / GameConfig.initialLives).clamp(0.0, 1.0);
+    return Color.lerp(Colors.red.shade900, Colors.green.shade800, t)!;
+  }
 
   Future<void> _handleExit() async {
     if (_isTransitioning) return;
@@ -118,8 +147,16 @@ class _PlayScreenState extends State<PlayScreen> {
             if (rawValue is! Map) return const Center(child: Text('Invalid data format.'));
 
             final sessionData = Map<dynamic, dynamic>.from(rawValue);
+            
+            // --- MOVED DECLARATIONS TO TOP OF BUILDER ---
             final String status = sessionData['status'] ?? 'playing';
+            final int missedCount = (sessionData['missed_count'] as num?)?.toInt() ?? 0;
+            final int roundNumber = (sessionData['round_number'] as num? ?? 1).toInt();
+            final int roundEnd = (sessionData['round_end_timestamp'] as num? ?? 0).toInt();
+            final int totalRoundDuration = (sessionData['round_duration_ms'] as num? ?? 120000).toInt();
+            final int livesRemaining = (GameConfig.initialLives - missedCount).clamp(0, GameConfig.initialLives);
 
+            // Handle Success Navigation
             if (status == 'success' && !_isTransitioning) {
               _isTransitioning = true;
               WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -131,7 +168,7 @@ class _PlayScreenState extends State<PlayScreen> {
                         sessionId: widget.sessionId,
                         localPlayerId: widget.localPlayerId,
                         localPlayerName: widget.localPlayerName,
-                        missedCount: (sessionData['missed_count'] as num? ?? 0).toInt(),
+                        missedCount: missedCount,
                         isHost: widget.isHost,
                       ),
                     ),
@@ -141,10 +178,27 @@ class _PlayScreenState extends State<PlayScreen> {
               return const Center(child: Text('MISSION COMPLETE\nPREPARING DEBRIEF...'));
             }
 
-            final int missedCount = (sessionData['missed_count'] as num?)?.toInt() ?? 0;
-            final int roundNumber = (sessionData['round_number'] as num? ?? 1).toInt();
-            final int roundEnd = (sessionData['round_end_timestamp'] as num? ?? 0).toInt();
-            final int totalRoundDuration = (sessionData['round_duration_ms'] as num? ?? 120000).toInt();
+            // Handle Fail Navigation
+            if (status == 'fail' && !_isTransitioning) {
+              _isTransitioning = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => FailScreen(
+                        sessionId: widget.sessionId,
+                        localPlayerId: widget.localPlayerId,
+                        localPlayerName: widget.localPlayerName,
+                        roundNumber: roundNumber,
+                        isHost: widget.isHost,
+                      ),
+                    ),
+                  );
+                }
+              });
+              return const Center(child: Text('HULL INTEGRITY CRITICAL\nEVACUATING...'));
+            }
 
             final dynamic playersRaw = sessionData['players'];
             Map<dynamic, dynamic> playersData = playersRaw is Map ? playersRaw : {};
@@ -153,9 +207,12 @@ class _PlayScreenState extends State<PlayScreen> {
             final Map<dynamic, dynamic> localPlayerData = localPlayerDataRaw is Map ? localPlayerDataRaw : {};
             
             final String localInstruction = localPlayerData['current_instruction']?.toString() ?? 'Stand by...';
-            
             final int instructionDuration = (localPlayerData['instruction_duration'] as num? ?? 15).toInt();
             final String lastResult = localPlayerData['last_result']?.toString() ?? 'none';
+
+            if (lastResult == 'fail' && !_flashController.isAnimating) {
+              _flashController.forward(from: 0.0);
+            }
 
             final dynamic controlsRaw = sessionData['controls'];
             List<GameControl> activeControls = [];
@@ -165,7 +222,6 @@ class _PlayScreenState extends State<PlayScreen> {
               controlsRaw.forEach((key, data) {
                 if (data is Map) {
                   String ownerId = data['ownerId']?.toString() ?? '';
-
                   List<String>? parsedOptions;
                   if (data['options'] != null && data['options'] is List) {
                     parsedOptions = List<String>.from(data['options']);
@@ -187,7 +243,6 @@ class _PlayScreenState extends State<PlayScreen> {
                   );
 
                   allRoomControls.add(parsedControl);
-
                   if (ownerId == widget.localPlayerId) {
                     activeControls.add(parsedControl);
                   }
@@ -212,15 +267,33 @@ class _PlayScreenState extends State<PlayScreen> {
                     ),
                   ),
                 ),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(8.0),
-                  color: Colors.red.shade900,
-                  child: Text(
-                    'TEAM ERRORS: $missedCount',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white, fontSize: 16),
-                  ),
+                
+                Stack(
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 600),
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(8.0),
+                      color: _getLivesColor(livesRemaining),
+                      child: Text(
+                        'HULL INTEGRITY: $livesRemaining / ${GameConfig.initialLives}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white, 
+                          fontSize: 16, 
+                          fontWeight: FontWeight.bold
+                        ),
+                      ),
+                    ),
+                    FadeTransition(
+                      opacity: _flashOpacity,
+                      child: Container(
+                        width: double.infinity,
+                        height: 38,
+                        color: Colors.red.shade400,
+                      ),
+                    ),
+                  ],
                 ),
                 
                 AnimatedInstructionBanner(
@@ -324,13 +397,11 @@ class _PlayScreenState extends State<PlayScreen> {
                   ),
                 ),
 
-                // Always rendered to maintain UI layout, but visibility and animation depend on round status
                 Opacity(
                   opacity: (roundEnd > 0 && !_isTransitioning) ? 1.0 : 0.0,
                   child: RoundTimerBanner(
                     endTimestamp: roundEnd,
                     totalDurationMs: totalRoundDuration,
-                    // Prevent logic execution if the banner is "hidden"
                     isActive: roundEnd > 0 && !_isTransitioning,
                     onFinished: () {
                       if (widget.isHost && !_isTransitioning && roundEnd > 0) {

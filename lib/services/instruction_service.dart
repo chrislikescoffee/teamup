@@ -264,14 +264,25 @@ class InstructionService {
     }
   }
 
-  Future<void> handleInstructionTimeout(
+Future<void> handleInstructionTimeout(
     String sessionId,
     String playerId,
     List<GameControl> allRoomControls,
     Map<dynamic, dynamic> playersData,
   ) async {
     debugPrint('DEBUG: Instruction Timeout for $playerId. Punishing team.');
+    
+    // 1. Increment missed count
     await _firebaseService.incrementMissedCount(sessionId);
+    
+    // 2. CHECK FOR GAME OVER
+    // We fetch the fresh missed count to see if lives are gone
+    final currentMissed = (playersData.values.first['missed_count'] as num? ?? 0).toInt() + 1;
+    
+    if (currentMissed >= GameConfig.initialLives) {
+      await _firebaseService.initializeRoom(sessionId, {'status': 'fail'});
+      return; // Stop further generation if game is over
+    }
     
     await _firebaseService.initializeRoom(sessionId, {
       'players/$playerId/target_id': 'FAILED',
