@@ -152,6 +152,8 @@ class _PlayScreenState extends State<PlayScreen> with SingleTickerProviderStateM
             final String status = sessionData['status'] ?? 'playing';
             final int missedCount = (sessionData['missed_count'] as num?)?.toInt() ?? 0;
             final int roundNumber = (sessionData['round_number'] as num? ?? 1).toInt();
+            final int completedCount = (sessionData['completed_count'] as num?)?.toInt() ?? 0; // Add this
+            final int noiseCount = (sessionData['noise_count'] as num?)?.toInt() ?? 0;
             final int roundEnd = (sessionData['round_end_timestamp'] as num? ?? 0).toInt();
             final int totalRoundDuration = (sessionData['round_duration_ms'] as num? ?? 120000).toInt();
             final int livesRemaining = (GameConfig.initialLives - missedCount).clamp(0, GameConfig.initialLives);
@@ -190,7 +192,10 @@ class _PlayScreenState extends State<PlayScreen> with SingleTickerProviderStateM
                         sessionId: widget.sessionId,
                         localPlayerId: widget.localPlayerId,
                         localPlayerName: widget.localPlayerName,
-                        roundNumber: roundNumber,
+                        roundNumber: roundNumber,                       
+                        completedInstructions: completedCount,
+                        missedInstructions: missedCount,
+                        noiseChanges: noiseCount,
                         isHost: widget.isHost,
                       ),
                     ),
@@ -353,41 +358,60 @@ class _PlayScreenState extends State<PlayScreen> with SingleTickerProviderStateM
                                     safeWidth = maxWrapWidth - 32;
                                   }
 
-                                  return SizedBox(
-                                    width: safeWidth,
-                                    child: Card(
-                                      elevation: 4,
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(12.0),
-                                        child: FittedBox(
-                                          fit: BoxFit.scaleDown,
-                                          child: SizedBox(
-                                            width: idealWidth, 
-                                            child: controlFactory(
-                                              control, 
-                                              (newValue) {
-                                                if (!_isTransitioning) {
-                                                  _firebaseService.updateControl(widget.sessionId, control.id, newValue);
-                                                }
-                                              },
-                                              (finalValue) {
-                                                if (!_isTransitioning) {
-                                                  _instructionService.verifyInteraction(
-                                                    sessionId: widget.sessionId,
-                                                    control: control,
-                                                    newValue: finalValue,
-                                                    playersData: playersData, 
-                                                    allRoomControls: allRoomControls,
-                                                  );
-                                                }
-                                              }
+                                    return SizedBox(
+                                        width: safeWidth,
+                                        child: Card(
+                                          elevation: 4,
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(12.0),
+                                            child: FittedBox(
+                                              fit: BoxFit.scaleDown,
+                                              child: SizedBox(
+                                                width: idealWidth, 
+                                                child: controlFactory(
+                                                  control, 
+                                                  (newValue) {
+                                                    // LIGHTWEIGHT UPDATE: 
+                                                    // Only sync the visual position to Firebase. 
+                                                    // No noise detection or heavy logic here.
+                                                    if (!_isTransitioning) {
+                                                      _firebaseService.updateControl(widget.sessionId, control.id, newValue);
+                                                    }
+                                                  },
+                                                  (finalValue) {
+                                                    if (!_isTransitioning) {
+                                                      // 1. NOISE DETECTION (THE COMMIT CHECK)
+                                                      bool isTargeted = false;
+                                                      for (var pData in playersData.values) {
+                                                        if (pData is Map && pData['target_id'] == control.id) {
+                                                          isTargeted = true;
+                                                          break;
+                                                        }
+                                                      }
+
+                                                      if (!isTargeted) {
+                                                        // Only count as noise once the user lets go of an unauthorized control
+                                                        _firebaseService.incrementNoiseCount(widget.sessionId);
+                                                        debugPrint('DEBUG: Noise committed on ${control.label}');
+                                                      }
+
+                                                      // 2. VERIFICATION LOGIC
+                                                      _instructionService.verifyInteraction(
+                                                        sessionId: widget.sessionId,
+                                                        control: control,
+                                                        newValue: finalValue,
+                                                        playersData: playersData, 
+                                                        allRoomControls: allRoomControls,
+                                                      );
+                                                    }
+                                                  }
+                                                ),
+                                              ),
                                             ),
                                           ),
                                         ),
-                                      ),
-                                    ),
-                                  );
-                                }).toList(),
+                                      );
+                                    }).toList(),
                               ),
                             ),
                           ),

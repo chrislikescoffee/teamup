@@ -8,6 +8,7 @@ class InstructionService {
   final FirebaseService _firebaseService = FirebaseService();
   final Random _random = Random();
 
+
   Future<void> generateInstructionForPlayer(
     String sessionId,
     String playerId,
@@ -18,6 +19,10 @@ class InstructionService {
       debugPrint('DEBUG STANDBY: allRoomControls is empty for $playerId');
       return;
     }
+
+    await _firebaseService.initializeRoom(sessionId, {
+      'completed_count': (playersData.values.first['completed_count'] as num? ?? 0).toInt() + 1,
+    });
 
     // 1. Get the current target_id to prevent picking the same one twice
     final String currentTargetId = playersData[playerId]?['target_id']?.toString() ?? '';
@@ -72,6 +77,12 @@ class InstructionService {
             
         debugPrint('DEBUG TOGGLE: ${targetControl.label} is currently ${currentlyOn ? "ON" : "OFF"}. Setting Target to $targetValue');
         break;
+
+        case ControlType.hold:
+          targetValue = 1.0;
+          instructionText = "HOLD ${targetControl.label}";
+          debugPrint('DEBUG: Hold logic applied for ${targetControl.label}');
+          break;
 
       case ControlType.choice:
       case ControlType.dial:

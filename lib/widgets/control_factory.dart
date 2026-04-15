@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import '../models/game_control.dart';
+import 'hold_button.dart';
 
 Widget controlFactory(
   GameControl control, 
@@ -18,6 +19,15 @@ Widget controlFactory(
           onCommitted(numVal);
         },
       );
+
+    case ControlType.hold:
+      return HoldButton(
+        label: control.label,
+        // Uses the helper function defined at the bottom of this file
+        meterColor: _parseColor(control.unit), 
+        // Matches the 'onCommitted' parameter name in the function signature
+        onComplete: () => onCommitted(1.0),
+      );  
 
     case ControlType.sequence:
       return _SequencePad(
@@ -121,6 +131,17 @@ Widget controlFactory(
 
     default:
       return const SizedBox.shrink();
+  }
+}
+
+// --- Helper function to parse hex strings from control.unit ---
+Color _parseColor(String colorString) {
+  try {
+    String hex = colorString.replaceAll('#', '');
+    if (hex.length == 6) hex = 'FF$hex';
+    return Color(int.parse(hex, radix: 16));
+  } catch (e) {
+    return Colors.cyanAccent; // Default fallback
   }
 }
 
@@ -312,10 +333,6 @@ class _SequencePadState extends State<_SequencePad> {
   @override
   void didUpdateWidget(covariant _SequencePad oldWidget) {
     super.didUpdateWidget(oldWidget);
-    
-    // IF THE TARGET VALUE IN THE DATABASE CHANGES:
-    // This means the InstructionService has acknowledged a success 
-    // and assigned a new task. We should clear the pad now.
     if (oldWidget.control.value != widget.control.value) {
       setState(() {
         _currentInput = "";
@@ -328,20 +345,14 @@ class _SequencePadState extends State<_SequencePad> {
       _currentInput += (index + 1).toString();
     });
 
-    // We calculate the length of the code we are currently typing towards
     int targetLength = widget.control.value.toInt().toString().length;
     if (targetLength < 3) targetLength = 3; 
 
-    // Once we reach the length, we submit it for verification
     if (_currentInput.length >= targetLength) {
       try {
         double val = double.parse(_currentInput);
         widget.onChanged(val);
         widget.onComplete(val);
-        
-        // AUTO-RESET REMOVED FROM HERE:
-        // We no longer clear here. If the code is wrong, it stays on screen.
-        // If it is correct, 'didUpdateWidget' will catch the change and clear it.
       } catch (e) {
         debugPrint("Error parsing sequence: $e");
       }

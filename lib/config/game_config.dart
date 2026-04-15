@@ -5,7 +5,7 @@ class GameConfig {
   static const int initialRoundDurationMs = 60000; // 2 Minutes
   static const int minRoundDurationMs = 45000;      // Floor of 45 seconds
   static const int roundDurationDecrementMs = 15000; // Time lost per round level
-  static const int initialLives = 10;
+  static const int initialLives = 1;
 
   // --- INSTRUCTION SETTINGS ---
   static const int initialInstructionSeconds = 15;
@@ -39,4 +39,6 @@ class GameConfig {
   static const Color instructionColor = Colors.white;
   static const double instructionFontSize = 24.0;
   static const double progressBarHeight = 8.0;
+
+  static const int buttonHoldMs = 2000; // 2 seconds to fill
 }

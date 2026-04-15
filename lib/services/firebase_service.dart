@@ -121,6 +121,13 @@ class FirebaseService {
     });
   }
 
+    Future<void> incrementNoiseCount(String sessionId) async {
+    final ref = _dbRef.child('sessions/$sessionId/noise_count');
+    final snapshot = await ref.get();
+    int current = (snapshot.value as num? ?? 0).toInt();
+    await ref.set(current + 1);
+  }
+
   // CRITICAL FIX: Changed from .set() to .update() so we don't overwrite the hostId or status
   Future<void> initializeRoom(String sessionId, Map<String, dynamic> data) async {
     await _dbRef.child('sessions/$sessionId').update(data);

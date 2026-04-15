@@ -7,6 +7,9 @@ class FailScreen extends StatelessWidget {
   final String localPlayerId;
   final String localPlayerName;
   final int roundNumber;
+  final int completedInstructions;
+  final int missedInstructions;
+  final int noiseChanges;
   final bool isHost;
 
   const FailScreen({
@@ -15,6 +18,9 @@ class FailScreen extends StatelessWidget {
     required this.localPlayerId,
     required this.localPlayerName,
     required this.roundNumber,
+    required this.completedInstructions,
+    required this.missedInstructions,
+    required this.noiseChanges,
     required this.isHost,
   });
 
@@ -25,11 +31,12 @@ class FailScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.black,
       body: Center(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              // Restored Large Warning Icon
               const Icon(
                 Icons.report_problem,
                 color: Colors.redAccent,
@@ -56,6 +63,8 @@ class FailScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 40),
+
+              // Restored and Expanded Debrief Container
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -67,46 +76,70 @@ class FailScreen extends StatelessWidget {
                   children: [
                     const Text(
                       'DEBRIEF DATA',
-                      style: TextStyle(color: Colors.white70, fontSize: 14),
-                    ),
-                    const Divider(color: Colors.redAccent),
-                    const SizedBox(height: 10),
-                    Text(
-                      'ROUNDS SURVIVED: $roundNumber',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
+                      style: TextStyle(
+                        color: Colors.white70, 
+                        fontSize: 14, 
+                        letterSpacing: 1.5,
+                        fontWeight: FontWeight.bold
                       ),
+                    ),
+                    const Divider(color: Colors.redAccent, height: 25),
+                    
+                    _buildStatRow('ROUNDS SURVIVED', roundNumber.toString()),
+                    _buildStatRow('TASKS COMPLETED', completedInstructions.toString()),
+                    _buildStatRow('TASKS FAILED', missedInstructions.toString()),
+                    _buildStatRow('UNAUTHORIZED INPUTS', noiseChanges.toString()),
+                    
+                    const Divider(color: Colors.white10, height: 25),
+                    
+                    _buildStatRow(
+                      'STABILITY RATING', 
+                      _calculateEfficiency(), 
+                      isHighlight: true
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 60),
+
+              // Restored Host Action Logic
               if (isHost)
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.redAccent,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                   onPressed: () async {
-                    // Host resets the room status to 'lobby' to play again
+                    // Reset all counters when restarting
                     await firebaseService.initializeRoom(sessionId, {
                       'status': 'lobby',
                       'missed_count': 0,
+                      'completed_count': 0,
+                      'noise_count': 0,
                       'round_number': 1,
                     });
                   },
-                  child: const Text('RE-ESTABLISH UPLINK'),
+                  child: const Text(
+                    'RE-ESTABLISH UPLINK',
+                    style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                  ),
                 )
               else
                 const Text(
                   'WAITING FOR HOST TO RECALIBRATE...',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white54, fontStyle: FontStyle.italic),
+                  style: TextStyle(
+                    color: Colors.white54, 
+                    fontStyle: FontStyle.italic,
+                    fontSize: 14
+                  ),
                 ),
+              
               const SizedBox(height: 20),
+              
+              // Restored Exit Logic
               TextButton(
                 onPressed: () {
                   Navigator.pushReplacement(
@@ -116,7 +149,7 @@ class FailScreen extends StatelessWidget {
                 },
                 child: const Text(
                   'ABANDON SHIP',
-                  style: TextStyle(color: Colors.white38),
+                  style: TextStyle(color: Colors.white38, letterSpacing: 1.1),
                 ),
               ),
             ],
@@ -124,5 +157,40 @@ class FailScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  // Restored helper widget for consistent data rows
+  Widget _buildStatRow(String label, String value, {bool isHighlight = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: isHighlight ? Colors.white : Colors.white70,
+              fontSize: 13,
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              color: isHighlight ? Colors.greenAccent : Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: isHighlight ? 18 : 15,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Restored efficiency logic
+  String _calculateEfficiency() {
+    int total = completedInstructions + missedInstructions;
+    if (total == 0) return "0.0%";
+    double perc = (completedInstructions / total) * 100;
+    return "${perc.toStringAsFixed(1)}%";
   }
 }
